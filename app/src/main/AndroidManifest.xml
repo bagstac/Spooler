@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The app is useless without NFC hardware; hide it from stores/installs on devices lacking it. -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="true" />
+
+    <!-- usesCleartextTraffic: Spoolman on the home LAN is plain http. POC-acceptable;
+         switch to a network security config pinned to the LAN host if this ever ships. -->
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.Spooler"
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true">
+
+        <!--
+          singleTop so a foreground rescan never relaunches the activity.
+          Tag dispatch is handled via reader mode (enableReaderMode), not
+          intent filters — reader mode is the only way to get raw NfcA access
+          without Android first trying (and failing) to parse NDEF.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

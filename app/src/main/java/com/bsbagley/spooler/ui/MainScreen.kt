@@ -1,0 +1,394 @@
+package com.bsbagley.spooler.ui
+
+import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bsbagley.spooler.NfcStatus
+import com.bsbagley.spooler.ScanUiState
+import com.bsbagley.spooler.ScanViewModel
+import com.bsbagley.spooler.SendState
+import com.bsbagley.spooler.data.ScanRecord
+import com.bsbagley.spooler.tag.FilamentInfo
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val TIME_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault())
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainScreen(
+    viewModel: ScanViewModel,
+    nfcStatus: NfcStatus,
+    onOpenNfcSettings: () -> Unit,
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val history by viewModel.history.collectAsState()
+    val spoolmanUrl by viewModel.spoolmanUrl.collectAsState()
+    var showSettings by remember { mutableStateOf(false) }
+
+    if (showSettings) {
+        SettingsDialog(
+            currentUrl = spoolmanUrl,
+            onSave = { viewModel.setSpoolmanUrl(it); showSettings = false },
+            onDismiss = { showSettings = false },
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Spooler") },
+                actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (nfcStatus) {
+                NfcStatus.UNSUPPORTED -> item {
+                    StatusCard("This device has no NFC hardware.", isError = true)
+                }
+                NfcStatus.DISABLED -> item {
+                    Card {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("NFC is turned off.", style = MaterialTheme.typography.titleMedium)
+                            Button(onClick = onOpenNfcSettings) { Text("Open NFC settings") }
+                        }
+                    }
+                }
+                NfcStatus.READY -> Unit
+            }
+
+            when (val state = uiState) {
+                ScanUiState.Idle -> item {
+                    StatusCard("Hold an Anycubic filament tag against the back of the phone.")
+                }
+                ScanUiState.Reading -> item {
+                    StatusCard("Reading tag…", showProgress = true)
+                }
+                is ScanUiState.Error -> item {
+                    StatusCard(state.message, isError = true)
+                }
+                is ScanUiState.Result -> {
+                    item { ResultSection(state.record, viewModel) }
+                }
+            }
+
+            if (history.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "History (${history.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = viewModel::clearHistory) { Text("Clear") }
+                    }
+                }
+                items(history, key = { it.timestampMillis }) { record ->
+                    HistoryRow(record, onClick = { viewModel.showRecord(record) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusCard(message: String, isError: Boolean = false, showProgress: Boolean = false) {
+    Card(
+        colors = if (isError) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (showProgress) CircularProgressIndicator(Modifier.size(24.dp))
+            Text(message, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun ResultSection(record: ScanRecord, viewModel: ScanViewModel) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val sendState by viewModel.sendState.collectAsState()
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        record.filament?.let { FilamentCard(it) }
+        record.decodeError?.let {
+            StatusCard("Read the tag, but couldn't decode it: $it", isError = true)
+        }
+
+        TagInfoCard(record)
+
+        if (record.filament != null) {
+            SendToSpoolmanRow(sendState, onSend = { viewModel.sendToSpoolman(record) })
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                clipboard.setText(AnnotatedString(viewModel.recordJson(record)))
+            }) { Text("Copy JSON") }
+            OutlinedButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, viewModel.recordJson(record))
+                }
+                context.startActivity(Intent.createChooser(send, "Share scan"))
+            }) { Text("Share") }
+        }
+
+        HexDumpCard(record.hex)
+    }
+}
+
+@Composable
+private fun SendToSpoolmanRow(sendState: SendState, onSend: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = onSend, enabled = sendState != SendState.Sending) {
+            if (sendState == SendState.Sending) {
+                CircularProgressIndicator(
+                    Modifier.size(18.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(if (sendState == SendState.Sending) "Sending…" else "Send to Spoolman")
+        }
+        when (sendState) {
+            is SendState.Success -> Text(
+                "✓ ${sendState.message}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            is SendState.Error -> Text(
+                sendState.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            else -> Unit
+        }
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    currentUrl: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember { mutableStateOf(currentUrl) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings") },
+        text = {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                label = { Text("Spoolman URL") },
+                placeholder = { Text("http://192.168.x.x:7912") },
+                singleLine = true,
+            )
+        },
+        confirmButton = { TextButton(onClick = { onSave(url) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun FilamentCard(info: FilamentInfo) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Filament", style = MaterialTheme.typography.titleMedium)
+            InfoRow("SKU", info.sku.ifEmpty { "—" })
+            InfoRow("Brand", info.brand.ifEmpty { "—" })
+            InfoRow("Material", info.material.ifEmpty { "—" })
+            ColorRow(info.colorHex)
+            InfoRow("Extruder", tempRange(info.extruderMinC, info.extruderMaxC))
+            InfoRow("Bed", tempRange(info.bedMinC, info.bedMaxC))
+            InfoRow("Diameter", info.diameterMm?.let { "$it mm" } ?: "—")
+            InfoRow("Length", info.lengthMeters?.let { "$it m" } ?: "—")
+        }
+    }
+}
+
+private fun tempRange(min: Int?, max: Int?): String = when {
+    min != null && max != null -> "$min–$max °C"
+    min != null -> "$min °C"
+    max != null -> "$max °C"
+    else -> "—"
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row {
+        Text(
+            label,
+            modifier = Modifier.width(96.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ColorRow(colorHex: String) {
+    val swatch = remember(colorHex) {
+        colorHex.toLongOrNull(16)?.let { Color(0xFF000000L or it) }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Color",
+            modifier = Modifier.width(96.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (swatch != null) {
+            Box(
+                Modifier
+                    .size(18.dp)
+                    .background(swatch, CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        Text("#$colorHex", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun TagInfoCard(record: ScanRecord) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Tag", style = MaterialTheme.typography.titleMedium)
+            InfoRow("UID", record.uidHex)
+            InfoRow("ATQA", "0x${record.atqaHex}")
+            InfoRow("SAK", "0x%02X".format(record.sak))
+            InfoRow("Pages read", "${record.pagesRead}${if (record.complete) "" else " (partial)"}")
+            InfoRow("Scanned", TIME_FORMAT.format(Instant.ofEpochMilli(record.timestampMillis)))
+        }
+    }
+}
+
+@Composable
+private fun HexDumpCard(hex: String) {
+    val lines = remember(hex) { hexToPageLines(hex) }
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Raw memory", style = MaterialTheme.typography.titleMedium)
+            Text(
+                lines.joinToString("\n"),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+            )
+        }
+    }
+}
+
+/** "P04  7B 00 65 00  {.e." — one line per 4-byte Type 2 page. */
+private fun hexToPageLines(hex: String): List<String> {
+    val bytes = hex.chunked(2).mapNotNull { it.toIntOrNull(16) }
+    return bytes.chunked(4).mapIndexed { page, chunk ->
+        val hexPart = chunk.joinToString(" ") { "%02X".format(it) }
+        val asciiPart = chunk.map { if (it in 0x20..0x7E) it.toChar() else '·' }
+            .joinToString("")
+        "P%02d  %-11s  %s".format(page, hexPart, asciiPart)
+    }
+}
+
+@Composable
+private fun HistoryRow(record: ScanRecord, onClick: () -> Unit) {
+    Card(modifier = Modifier.clickable(onClick = onClick)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            val title = record.filament?.let {
+                listOf(it.material, it.sku).filter(String::isNotEmpty).joinToString(" · ")
+            } ?: "Undecoded scan"
+            Text(title.ifEmpty { "Undecoded scan" }, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "${TIME_FORMAT.format(Instant.ofEpochMilli(record.timestampMillis))}  ·  UID ${record.uidHex}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}

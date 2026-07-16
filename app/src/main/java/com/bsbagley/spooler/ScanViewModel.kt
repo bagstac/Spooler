@@ -11,6 +11,8 @@ import com.bsbagley.spooler.nfc.TagReader
 import com.bsbagley.spooler.nfc.toHex
 import com.bsbagley.spooler.spoolman.SpoolmanClient
 import com.bsbagley.spooler.tag.AnycubicDecoder
+import com.bsbagley.spooler.tag.AnycubicEncoder
+import com.bsbagley.spooler.tag.FilamentInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +37,16 @@ sealed interface SendState {
     data class Error(val message: String) : SendState
 }
 
+sealed interface WriteState {
+    data object Idle : WriteState
+
+    /** Write is armed: the next tag presented gets [bytes] written to it. */
+    class Armed(val bytes: ByteArray) : WriteState
+    data object Writing : WriteState
+    data class Success(val message: String) : WriteState
+    data class Error(val message: String) : WriteState
+}
+
 class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ScanHistoryStore(app)
@@ -53,6 +65,9 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _spoolmanUrl = MutableStateFlow(settings.spoolmanUrl)
     val spoolmanUrl: StateFlow<String> = _spoolmanUrl.asStateFlow()
 
+    private val _writeState = MutableStateFlow<WriteState>(WriteState.Idle)
+    val writeState: StateFlow<WriteState> = _writeState.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _history.value = store.loadAll()
@@ -61,27 +76,31 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Entry point from NfcAdapter.ReaderCallback — called on a binder thread. */
     fun onTagScanned(tag: Tag) {
+        // An armed write claims the tag; otherwise it's a normal read.
+        val armed = _writeState.value as? WriteState.Armed
+        if (armed != null) {
+            _writeState.value = WriteState.Writing
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    TagReader.writeAndVerify(tag, armed.bytes, AnycubicEncoder.START_PAGE)
+                    _writeState.value = WriteState.Success("Tag written and verified.")
+                    // Show the freshly written tag as a normal scan result.
+                    runCatching { readAndRecord(tag) }
+                } catch (e: IOException) {
+                    _writeState.value = WriteState.Error(
+                        "Write failed (${e.message ?: "connection lost"}). " +
+                            "The tag may be write-protected or moved too soon — arm and try again."
+                    )
+                }
+            }
+            return
+        }
+
         _uiState.value = ScanUiState.Reading
         _sendState.value = SendState.Idle
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val raw = TagReader.read(tag)
-                val decoded = runCatching { AnycubicDecoder.decode(raw.bytes) }
-                val now = System.currentTimeMillis()
-                val record = ScanRecord(
-                    timestampMillis = now,
-                    timestampIso = Instant.ofEpochMilli(now).toString(),
-                    uidHex = raw.uidHex,
-                    atqaHex = raw.atqaHex,
-                    sak = raw.sak,
-                    pagesRead = raw.pagesRead,
-                    complete = raw.complete,
-                    hex = raw.bytes.toHex(),
-                    filament = decoded.getOrNull(),
-                    decodeError = decoded.exceptionOrNull()?.message,
-                )
-                _history.value = store.add(record)
-                _uiState.value = ScanUiState.Result(record)
+                readAndRecord(tag)
             } catch (e: IOException) {
                 _uiState.value = ScanUiState.Error(
                     "Tag read failed (${e.message ?: "connection lost"}). " +
@@ -89,6 +108,36 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
+    }
+
+    private fun readAndRecord(tag: Tag) {
+        val raw = TagReader.read(tag)
+        val decoded = runCatching { AnycubicDecoder.decode(raw.bytes) }
+        val now = System.currentTimeMillis()
+        val record = ScanRecord(
+            timestampMillis = now,
+            timestampIso = Instant.ofEpochMilli(now).toString(),
+            uidHex = raw.uidHex,
+            atqaHex = raw.atqaHex,
+            sak = raw.sak,
+            pagesRead = raw.pagesRead,
+            complete = raw.complete,
+            hex = raw.bytes.toHex(),
+            filament = decoded.getOrNull(),
+            decodeError = decoded.exceptionOrNull()?.message,
+        )
+        _history.value = store.add(record)
+        _uiState.value = ScanUiState.Result(record)
+    }
+
+    /** Arms a write: the next tag presented will be overwritten with [info]. */
+    fun armWrite(info: FilamentInfo) {
+        _writeState.value = WriteState.Armed(AnycubicEncoder.encode(info))
+    }
+
+    /** Cancels an armed write or dismisses a write result banner. */
+    fun resetWrite() {
+        _writeState.value = WriteState.Idle
     }
 
     fun showRecord(record: ScanRecord) {

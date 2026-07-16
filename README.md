@@ -65,9 +65,14 @@ decodes the Anycubic layout, saves the scan to history, and shows:
 - **Tag card** — UID, ATQA, SAK, pages read
 - **Raw memory** — hex + ASCII per page
 - **Copy JSON / Share** — full scan record for feeding Spoolman workflows
+- **Send to Spoolman** — creates the vendor/filament/spool via the REST API
+  (tag UID stored as `lot_nr` for dedupe); set your instance URL via ⚙
+- **Write tag…** — edit the scanned values and arm a write; the next tag held
+  to the phone is overwritten (`WRITE 0xA2`, pages 4–31 only — UID and lock
+  pages are never touched) and verified by read-back
 
 ## Roadmap
 
 - [ ] Reliability pass on real tags (read retries, damaged-tag handling)
-- [ ] Write support (`WRITE 0xA2`) for re-labeling spools
-- [ ] Spoolman integration (create/update spools via its REST API)
+- [x] Write support (`WRITE 0xA2`) for re-labeling spools
+- [x] Spoolman integration (create spools via its REST API)

@@ -83,10 +83,12 @@ fun MainScreen(
     val spoolmanUrl by viewModel.spoolmanUrl.collectAsState()
     val writeState by viewModel.writeState.collectAsState()
     val showRawDump by viewModel.showRawDump.collectAsState()
+    val showHistorySetting by viewModel.showHistory.collectAsState()
     // Prompt for the Spoolman URL on first launch (nothing configured yet).
     var showSettings by remember { mutableStateOf(spoolmanUrl.isBlank()) }
     // Non-null while the full-screen raw memory page is open.
     var rawDumpRecord by remember { mutableStateOf<ScanRecord?>(null) }
+    var showHistoryPage by remember { mutableStateOf(false) }
 
     rawDumpRecord?.let { record ->
         BackHandler { rawDumpRecord = null }
@@ -94,13 +96,26 @@ fun MainScreen(
         return
     }
 
+    if (showHistoryPage) {
+        BackHandler { showHistoryPage = false }
+        HistoryScreen(
+            history = history,
+            onSelect = { viewModel.showRecord(it); showHistoryPage = false },
+            onClear = viewModel::clearHistory,
+            onBack = { showHistoryPage = false },
+        )
+        return
+    }
+
     if (showSettings) {
         SettingsDialog(
             currentUrl = spoolmanUrl,
             showRawDump = showRawDump,
-            onSave = { url, rawDumpEnabled ->
+            showHistory = showHistorySetting,
+            onSave = { url, rawDumpEnabled, historyEnabled ->
                 viewModel.setSpoolmanUrl(url)
                 viewModel.setShowRawDump(rawDumpEnabled)
+                viewModel.setShowHistory(historyEnabled)
                 showSettings = false
             },
             onDismiss = { showSettings = false },
@@ -212,22 +227,12 @@ fun MainScreen(
                 }
             }
 
-            if (history.isNotEmpty()) {
+            if (showHistorySetting && history.isNotEmpty()) {
                 item {
-                    Row(
+                    OutlinedButton(
+                        onClick = { showHistoryPage = true },
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "History (${history.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = viewModel::clearHistory) { Text("Clear") }
-                    }
-                }
-                items(history, key = { it.timestampMillis }) { record ->
-                    HistoryRow(record, onClick = { viewModel.showRecord(record) })
+                    ) { Text("History (${history.size})") }
                 }
             }
         }
@@ -471,11 +476,13 @@ private fun WriteTagDialog(
 private fun SettingsDialog(
     currentUrl: String,
     showRawDump: Boolean,
-    onSave: (url: String, showRawDump: Boolean) -> Unit,
+    showHistory: Boolean,
+    onSave: (url: String, showRawDump: Boolean, showHistory: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by remember { mutableStateOf(currentUrl) }
     var rawDumpEnabled by remember { mutableStateOf(showRawDump) }
+    var historyEnabled by remember { mutableStateOf(showHistory) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
@@ -507,9 +514,25 @@ private fun SettingsDialog(
                     }
                     Switch(checked = rawDumpEnabled, onCheckedChange = { rawDumpEnabled = it })
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show history", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Adds a \"History\" button listing past scans",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = historyEnabled, onCheckedChange = { historyEnabled = it })
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(url, rawDumpEnabled) }) { Text("Save") } },
+        confirmButton = {
+            TextButton(onClick = { onSave(url, rawDumpEnabled, historyEnabled) }) { Text("Save") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -615,6 +638,44 @@ private fun hexToPageLines(hex: String): List<String> {
         val asciiPart = chunk.map { if (it in 0x20..0x7E) it.toChar() else '·' }
             .joinToString("")
         "P%02d  %-11s  %s".format(page, hexPart, asciiPart)
+    }
+}
+
+/** Full-screen page listing past scans; opened from the "History" button. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistoryScreen(
+    history: List<ScanRecord>,
+    onSelect: (ScanRecord) -> Unit,
+    onClear: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("History (${history.size})") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(onClick = onClear) { Text("Clear") }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(history, key = { it.timestampMillis }) { record ->
+                HistoryRow(record, onClick = { onSelect(record) })
+            }
+        }
     }
 }
 

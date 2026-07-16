@@ -5,6 +5,11 @@ filament data (SKU, material, color, temps, diameter, length) plus a raw hex
 dump. Groundwork for pushing spool data into
 [Spoolman](https://github.com/Donkie/Spoolman).
 
+**Prebuilt APK:** every push to `main` is built and published automatically —
+grab the latest one from the [Releases page](https://github.com/bagstac/Spooler/releases).
+It's a debug build (debug-key signed), so enable "Install unknown apps" for
+your file manager/browser to sideload it.
+
 ## Why a native app
 
 Anycubic tags are NFC Forum **Type 2 clone chips** (Shanghai Feiju, SAK `0x00`,

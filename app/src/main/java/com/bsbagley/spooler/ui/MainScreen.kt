@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -79,13 +82,27 @@ fun MainScreen(
     val history by viewModel.history.collectAsState()
     val spoolmanUrl by viewModel.spoolmanUrl.collectAsState()
     val writeState by viewModel.writeState.collectAsState()
+    val showRawDump by viewModel.showRawDump.collectAsState()
     // Prompt for the Spoolman URL on first launch (nothing configured yet).
     var showSettings by remember { mutableStateOf(spoolmanUrl.isBlank()) }
+    // Non-null while the full-screen raw memory page is open.
+    var rawDumpRecord by remember { mutableStateOf<ScanRecord?>(null) }
+
+    rawDumpRecord?.let { record ->
+        BackHandler { rawDumpRecord = null }
+        RawMemoryScreen(record, onBack = { rawDumpRecord = null })
+        return
+    }
 
     if (showSettings) {
         SettingsDialog(
             currentUrl = spoolmanUrl,
-            onSave = { viewModel.setSpoolmanUrl(it); showSettings = false },
+            showRawDump = showRawDump,
+            onSave = { url, rawDumpEnabled ->
+                viewModel.setSpoolmanUrl(url)
+                viewModel.setShowRawDump(rawDumpEnabled)
+                showSettings = false
+            },
             onDismiss = { showSettings = false },
         )
     }
@@ -184,7 +201,14 @@ fun MainScreen(
                     StatusCard(state.message, isError = true)
                 }
                 is ScanUiState.Result -> {
-                    item { ResultSection(state.record, viewModel) }
+                    item {
+                        ResultSection(
+                            record = state.record,
+                            viewModel = viewModel,
+                            showRawDumpButton = showRawDump,
+                            onViewRawDump = { rawDumpRecord = state.record },
+                        )
+                    }
                 }
             }
 
@@ -233,7 +257,12 @@ private fun StatusCard(message: String, isError: Boolean = false, showProgress: 
 }
 
 @Composable
-private fun ResultSection(record: ScanRecord, viewModel: ScanViewModel) {
+private fun ResultSection(
+    record: ScanRecord,
+    viewModel: ScanViewModel,
+    showRawDumpButton: Boolean,
+    onViewRawDump: () -> Unit,
+) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val sendState by viewModel.sendState.collectAsState()
@@ -275,7 +304,36 @@ private fun ResultSection(record: ScanRecord, viewModel: ScanViewModel) {
             }
         }
 
-        HexDumpCard(record.hex)
+        if (showRawDumpButton) {
+            OutlinedButton(onClick = onViewRawDump) { Text("View raw memory") }
+        }
+    }
+}
+
+/** Full-screen page for the per-page hex dump; opened from the "View raw memory" button. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RawMemoryScreen(record: ScanRecord, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Raw memory") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+        ) {
+            HexDumpCard(record.hex)
+        }
     }
 }
 
@@ -412,10 +470,12 @@ private fun WriteTagDialog(
 @Composable
 private fun SettingsDialog(
     currentUrl: String,
-    onSave: (String) -> Unit,
+    showRawDump: Boolean,
+    onSave: (url: String, showRawDump: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by remember { mutableStateOf(currentUrl) }
+    var rawDumpEnabled by remember { mutableStateOf(showRawDump) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
@@ -433,9 +493,23 @@ private fun SettingsDialog(
                     placeholder = { Text("http://192.168.x.x:7912") },
                     singleLine = true,
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show raw memory dump", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Adds a \"View raw memory\" button on scans",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = rawDumpEnabled, onCheckedChange = { rawDumpEnabled = it })
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(url) }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onSave(url, rawDumpEnabled) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

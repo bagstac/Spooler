@@ -69,6 +69,9 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _writeState = MutableStateFlow<WriteState>(WriteState.Idle)
     val writeState: StateFlow<WriteState> = _writeState.asStateFlow()
 
+    private val _showRawDump = MutableStateFlow(settings.showRawDump)
+    val showRawDump: StateFlow<Boolean> = _showRawDump.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _history.value = store.loadAll()
@@ -155,6 +158,11 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     fun setSpoolmanUrl(url: String) {
         settings.spoolmanUrl = url
         _spoolmanUrl.value = settings.spoolmanUrl
+    }
+
+    fun setShowRawDump(enabled: Boolean) {
+        settings.showRawDump = enabled
+        _showRawDump.value = enabled
     }
 
     /** Creates (or finds) the spool in Spoolman for this scan's decoded filament. */

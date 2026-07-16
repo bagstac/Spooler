@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -57,6 +58,7 @@ import com.bsbagley.spooler.NfcStatus
 import com.bsbagley.spooler.ScanUiState
 import com.bsbagley.spooler.ScanViewModel
 import com.bsbagley.spooler.SendState
+import com.bsbagley.spooler.WriteState
 import com.bsbagley.spooler.data.ScanRecord
 import com.bsbagley.spooler.tag.FilamentInfo
 import java.time.Instant
@@ -76,6 +78,7 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     val history by viewModel.history.collectAsState()
     val spoolmanUrl by viewModel.spoolmanUrl.collectAsState()
+    val writeState by viewModel.writeState.collectAsState()
     // Prompt for the Spoolman URL on first launch (nothing configured yet).
     var showSettings by remember { mutableStateOf(spoolmanUrl.isBlank()) }
 
@@ -119,6 +122,55 @@ fun MainScreen(
                     }
                 }
                 NfcStatus.READY -> Unit
+            }
+
+            when (val write = writeState) {
+                is WriteState.Armed -> item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Write armed", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Hold the target tag against the phone. Its filament data " +
+                                    "(pages 4–31) will be overwritten; the UID and lock pages are never touched.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            TextButton(onClick = viewModel::resetWrite) { Text("Cancel") }
+                        }
+                    }
+                }
+                WriteState.Writing -> item { StatusCard("Writing tag…", showProgress = true) }
+                is WriteState.Success -> item {
+                    Card {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "✓ ${write.message}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = viewModel::resetWrite) { Text("Dismiss") }
+                        }
+                    }
+                }
+                is WriteState.Error -> item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                write.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = viewModel::resetWrite) { Text("Dismiss") }
+                        }
+                    }
+                }
+                WriteState.Idle -> Unit
             }
 
             when (val state = uiState) {
@@ -185,6 +237,15 @@ private fun ResultSection(record: ScanRecord, viewModel: ScanViewModel) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val sendState by viewModel.sendState.collectAsState()
+    var showWriteDialog by remember(record) { mutableStateOf(false) }
+
+    if (showWriteDialog && record.filament != null) {
+        WriteTagDialog(
+            initial = record.filament,
+            onArm = { viewModel.armWrite(it); showWriteDialog = false },
+            onDismiss = { showWriteDialog = false },
+        )
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         record.filament?.let { FilamentCard(it) }
@@ -209,6 +270,9 @@ private fun ResultSection(record: ScanRecord, viewModel: ScanViewModel) {
                 }
                 context.startActivity(Intent.createChooser(send, "Share scan"))
             }) { Text("Share") }
+            if (record.filament != null) {
+                OutlinedButton(onClick = { showWriteDialog = true }) { Text("Write tag…") }
+            }
         }
 
         HexDumpCard(record.hex)
@@ -243,6 +307,106 @@ private fun SendToSpoolmanRow(sendState: SendState, onSend: () -> Unit) {
             else -> Unit
         }
     }
+}
+
+/**
+ * Edit-then-arm dialog: fields are prefilled from the last scan; confirming
+ * arms a write so the next tag presented gets the encoded data.
+ */
+@Composable
+private fun WriteTagDialog(
+    initial: FilamentInfo,
+    onArm: (FilamentInfo) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var sku by remember { mutableStateOf(initial.sku) }
+    var material by remember { mutableStateOf(initial.material) }
+    var colorHex by remember { mutableStateOf(initial.colorHex) }
+    var extMin by remember { mutableStateOf(initial.extruderMinC?.toString() ?: "") }
+    var extMax by remember { mutableStateOf(initial.extruderMaxC?.toString() ?: "") }
+    var bedMin by remember { mutableStateOf(initial.bedMinC?.toString() ?: "") }
+    var bedMax by remember { mutableStateOf(initial.bedMaxC?.toString() ?: "") }
+    var diameter by remember { mutableStateOf(initial.diameterMm?.toString() ?: "1.75") }
+    var length by remember { mutableStateOf(initial.lengthMeters?.toString() ?: "330") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun validateAndBuild(): FilamentInfo? {
+        if (!colorHex.matches(Regex("[0-9a-fA-F]{6}"))) {
+            error = "Color must be 6 hex digits (RRGGBB)."; return null
+        }
+        if (sku.encodeToByteArray().size > 16) { error = "SKU is too long (max 16 bytes)."; return null }
+        if (material.encodeToByteArray().size > 16) { error = "Material is too long (max 16 bytes)."; return null }
+        val d = diameter.toDoubleOrNull()
+        if (diameter.isNotBlank() && d == null) { error = "Diameter must be a number."; return null }
+        for ((label, v) in listOf("Extruder min" to extMin, "Extruder max" to extMax,
+                                  "Bed min" to bedMin, "Bed max" to bedMax, "Length" to length)) {
+            if (v.isNotBlank() && v.toIntOrNull() == null) { error = "$label must be a whole number."; return null }
+        }
+        val hex = colorHex.uppercase()
+        return FilamentInfo(
+            sku = sku.trim(),
+            brandCode = "AC",
+            brand = "Anycubic",
+            material = material.trim(),
+            colorHex = hex,
+            colorAbgr = listOf(
+                0xFF,
+                hex.substring(4, 6).toInt(16),
+                hex.substring(2, 4).toInt(16),
+                hex.substring(0, 2).toInt(16),
+            ),
+            extruderMinC = extMin.toIntOrNull(),
+            extruderMaxC = extMax.toIntOrNull(),
+            bedMinC = bedMin.toIntOrNull(),
+            bedMaxC = bedMax.toIntOrNull(),
+            diameterMm = d,
+            lengthMeters = length.toIntOrNull(),
+        )
+    }
+
+    @Composable
+    fun numField(value: String, onChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) =
+        OutlinedTextField(value, onChange, modifier = modifier, label = { Text(label) }, singleLine = true)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Write tag") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Arms a write with these values; the next tag you hold to the " +
+                        "phone is overwritten. UID and lock pages are never touched.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                numField(sku, { sku = it }, "SKU", Modifier.fillMaxWidth())
+                numField(material, { material = it }, "Material", Modifier.fillMaxWidth())
+                numField(colorHex, { colorHex = it }, "Color (RRGGBB)", Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    numField(extMin, { extMin = it }, "Extruder min °C", Modifier.weight(1f))
+                    numField(extMax, { extMax = it }, "Extruder max °C", Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    numField(bedMin, { bedMin = it }, "Bed min °C", Modifier.weight(1f))
+                    numField(bedMax, { bedMax = it }, "Bed max °C", Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    numField(diameter, { diameter = it }, "Diameter mm", Modifier.weight(1f))
+                    numField(length, { length = it }, "Length m", Modifier.weight(1f))
+                }
+                error?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { validateAndBuild()?.let(onArm) }) { Text("Arm write") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

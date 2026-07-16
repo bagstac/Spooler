@@ -17,6 +17,7 @@ import java.io.IOException
 object TagReader {
 
     private const val CMD_READ: Byte = 0x30
+    private val CMD_WRITE: Byte = 0xA2.toByte()
     private const val PAGES_PER_READ = 4
 
     /** Pages to attempt. NTAG213 = 45 pages (0..44); clones may NAK sooner. */
@@ -65,6 +66,62 @@ object TagReader {
                 pagesRead = pagesRead,
                 complete = pagesRead >= MIN_USEFUL_PAGES,
             )
+        } finally {
+            try {
+                nfcA.close()
+            } catch (_: IOException) {
+            }
+        }
+    }
+
+    /**
+     * Writes [data] (whole 4-byte pages) starting at [startPage] using Type 2
+     * WRITE (0xA2), then reads it back and verifies byte-for-byte.
+     *
+     * [startPage] must be >= 4: pages 0-3 hold the UID, lock bits, and
+     * capability container — overwriting them can permanently brick a tag.
+     *
+     * Must be called off the main thread (transceive blocks).
+     */
+    fun writeAndVerify(tag: Tag, data: ByteArray, startPage: Int = 4) {
+        require(startPage >= 4) { "Refusing to write pages 0-3 (UID/lock/CC)" }
+        require(data.isNotEmpty() && data.size % 4 == 0) { "Write data must be whole 4-byte pages" }
+
+        val nfcA = NfcA.get(tag)
+            ?: throw IOException("Tag does not support NfcA (techs: ${tag.techList.joinToString()})")
+
+        nfcA.connect()
+        try {
+            nfcA.timeout = 1_000
+            val pages = data.size / 4
+            for (i in 0 until pages) {
+                val off = i * 4
+                val response = nfcA.transceive(
+                    byteArrayOf(
+                        CMD_WRITE, (startPage + i).toByte(),
+                        data[off], data[off + 1], data[off + 2], data[off + 3],
+                    )
+                )
+                // Success is a 4-bit ACK (0xA); NAK usually surfaces as an
+                // IOException from transceive, but check the byte if returned.
+                if (response.isNotEmpty() && (response[0].toInt() and 0x0F) != 0x0A) {
+                    throw IOException("Tag rejected write of page ${startPage + i} (NAK)")
+                }
+            }
+
+            // Verify: read the range back and compare.
+            val readBack = ByteArrayOutputStream()
+            var page = startPage
+            while (readBack.size() < data.size) {
+                val response = nfcA.transceive(byteArrayOf(CMD_READ, page.toByte()))
+                if (response.size < 16) throw IOException("Verify read failed at page $page")
+                readBack.write(response, 0, 16)
+                page += PAGES_PER_READ
+            }
+            val actual = readBack.toByteArray().copyOf(data.size)
+            if (!actual.contentEquals(data)) {
+                throw IOException("Verification failed — tag contents don't match written data")
+            }
         } finally {
             try {
                 nfcA.close()

@@ -51,6 +51,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ScanHistoryStore(app)
     private val settings = SettingsStore(app)
+    private val haptics = Haptics(app)
     private val prettyJson = Json { prettyPrint = true }
 
     private val _uiState = MutableStateFlow<ScanUiState>(ScanUiState.Idle)
@@ -76,6 +77,8 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Entry point from NfcAdapter.ReaderCallback — called on a binder thread. */
     fun onTagScanned(tag: Tag) {
+        haptics.tagDetected()
+
         // An armed write claims the tag; otherwise it's a normal read.
         val armed = _writeState.value as? WriteState.Armed
         if (armed != null) {
@@ -84,6 +87,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     TagReader.writeAndVerify(tag, armed.bytes, AnycubicEncoder.START_PAGE)
                     _writeState.value = WriteState.Success("Tag written and verified.")
+                    haptics.success()
                     // Show the freshly written tag as a normal scan result.
                     runCatching { readAndRecord(tag) }
                 } catch (e: IOException) {
@@ -91,6 +95,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                         "Write failed (${e.message ?: "connection lost"}). " +
                             "The tag may be write-protected or moved too soon — arm and try again."
                     )
+                    haptics.error()
                 }
             }
             return
@@ -101,11 +106,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 readAndRecord(tag)
+                haptics.success()
             } catch (e: IOException) {
                 _uiState.value = ScanUiState.Error(
                     "Tag read failed (${e.message ?: "connection lost"}). " +
                         "Hold the tag still against the back of the phone and try again."
                 )
+                haptics.error()
             }
         }
     }

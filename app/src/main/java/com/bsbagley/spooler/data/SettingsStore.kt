@@ -16,7 +16,7 @@ class SettingsStore(context: Context) {
     companion object {
         private const val KEY_SPOOLMAN_URL = "spoolman_url"
 
-        /** The dev PC's LAN address at setup time; editable in the settings dialog. */
-        const val DEFAULT_SPOOLMAN_URL = "http://192.168.12.92:7912"
+        /** Blank until the user configures their instance (settings dialog opens on first launch). */
+        const val DEFAULT_SPOOLMAN_URL = ""
     }
 }

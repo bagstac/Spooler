@@ -76,7 +76,8 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     val history by viewModel.history.collectAsState()
     val spoolmanUrl by viewModel.spoolmanUrl.collectAsState()
-    var showSettings by remember { mutableStateOf(false) }
+    // Prompt for the Spoolman URL on first launch (nothing configured yet).
+    var showSettings by remember { mutableStateOf(spoolmanUrl.isBlank()) }
 
     if (showSettings) {
         SettingsDialog(
@@ -255,13 +256,20 @@ private fun SettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
         text = {
-            OutlinedTextField(
-                value = url,
-                onValueChange = { url = it },
-                label = { Text("Spoolman URL") },
-                placeholder = { Text("http://192.168.x.x:7912") },
-                singleLine = true,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Where is your Spoolman instance? Scanned spools are sent " +
+                        "to its REST API. You can change this any time.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("Spoolman URL") },
+                    placeholder = { Text("http://192.168.x.x:7912") },
+                    singleLine = true,
+                )
+            }
         },
         confirmButton = { TextButton(onClick = { onSave(url) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -107,6 +107,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             _sendState.value = SendState.Error("Nothing to send — this scan didn't decode.")
             return
         }
+        if (_spoolmanUrl.value.isBlank()) {
+            _sendState.value = SendState.Error("Set your Spoolman URL first (⚙ in the top bar).")
+            return
+        }
         _sendState.value = SendState.Sending
         viewModelScope.launch(Dispatchers.IO) {
             _sendState.value = try {

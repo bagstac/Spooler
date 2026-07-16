@@ -144,6 +144,10 @@ class SpoolmanClient(baseUrl: String) {
             throw e
         } catch (e: IOException) {
             throw SpoolmanException("Can't reach Spoolman at $apiBase (${e.message})")
+        } catch (e: IllegalArgumentException) {
+            // OkHttp throws this (not IOException) for a malformed URL, e.g. a
+            // stray space from autocorrect — surface it instead of crashing.
+            throw SpoolmanException("Invalid Spoolman URL '$apiBase' (${e.message})")
         }
 
     private companion object {

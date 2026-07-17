@@ -1,6 +1,5 @@
 package com.bsbagley.spooler.ui
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
@@ -28,15 +28,11 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -57,20 +53,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsbagley.spooler.NfcStatus
+import com.bsbagley.spooler.R
 import com.bsbagley.spooler.ScanUiState
 import com.bsbagley.spooler.ScanViewModel
-import com.bsbagley.spooler.SendState
 import com.bsbagley.spooler.WriteState
 import com.bsbagley.spooler.data.ScanRecord
 import com.bsbagley.spooler.tag.FilamentInfo
@@ -78,7 +74,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private val TIME_FORMAT: DateTimeFormatter =
+val TIME_FORMAT: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault())
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +134,21 @@ fun MainScreen(
         return
     }
 
+    (uiState as? ScanUiState.Result)?.let { state ->
+        BackHandler { viewModel.clearResult() }
+        ScanResultScreen(
+            record = state.record,
+            viewModel = viewModel,
+            sendState = sendState,
+            showRawDumpButton = showRawDump,
+            showWriteTagOption = showWriteTagSetting,
+            spoolmanEnabled = spoolmanEnabledSetting,
+            onViewRawDump = { rawDumpRecord = state.record },
+            onBack = viewModel::clearResult,
+        )
+        return
+    }
+
     if (showSettings) {
         SettingsDialog(
             currentUrl = spoolmanUrl,
@@ -160,13 +171,31 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Main Screen") },
-                actions = {
-                    if (uiState is ScanUiState.Result) {
-                        IconButton(onClick = viewModel::clearResult) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "New scan")
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // painterResource can't load the <adaptive-icon> mipmap
+                        // directly (it only supports vector/raster drawables),
+                        // so the background + foreground layers are recreated
+                        // here by hand, matching mipmap-anydpi-v26/ic_launcher.xml.
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colorResource(R.color.ic_launcher_background)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = null,
+                                modifier = Modifier.size(28.dp),
+                                tint = Color.Unspecified,
+                            )
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Text("Spooler")
                     }
+                },
+                actions = {
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -300,18 +329,7 @@ fun MainScreen(
                 is ScanUiState.Error -> item {
                     StatusCard(state.message, isError = true)
                 }
-                is ScanUiState.Result -> {
-                    item {
-                        ResultSection(
-                            record = state.record,
-                            viewModel = viewModel,
-                            showRawDumpButton = showRawDump,
-                            showWriteTagOption = showWriteTagSetting,
-                            spoolmanEnabled = spoolmanEnabledSetting,
-                            onViewRawDump = { rawDumpRecord = state.record },
-                        )
-                    }
-                }
+                is ScanUiState.Result -> Unit
             }
 
             if (showHistorySetting && history.isNotEmpty()) {
@@ -331,7 +349,7 @@ fun MainScreen(
 }
 
 @Composable
-private fun StatusCard(message: String, isError: Boolean = false, showProgress: Boolean = false) {
+fun StatusCard(message: String, isError: Boolean = false, showProgress: Boolean = false) {
     Card(
         colors = if (isError) {
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
@@ -408,85 +426,6 @@ private fun ActionCard(
     }
 }
 
-@Composable
-private fun ResultSection(
-    record: ScanRecord,
-    viewModel: ScanViewModel,
-    showRawDumpButton: Boolean,
-    showWriteTagOption: Boolean,
-    spoolmanEnabled: Boolean,
-    onViewRawDump: () -> Unit,
-) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    val sendState by viewModel.sendState.collectAsState()
-    var showWriteDialog by remember(record) { mutableStateOf(false) }
-
-    if (showWriteDialog && record.filament != null) {
-        WriteTagDialog(
-            initial = record.filament,
-            onArm = { viewModel.armWrite(it); showWriteDialog = false },
-            onDismiss = { showWriteDialog = false },
-        )
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        record.filament?.let { FilamentCard(it) }
-        record.decodeError?.let {
-            StatusCard("Read the tag, but couldn't decode it: $it", isError = true)
-        }
-
-        TagInfoCard(record)
-
-        if (spoolmanEnabled && record.filament != null) {
-            SendToSpoolmanRow(sendState, onSend = { viewModel.sendToSpoolman(record) })
-        }
-
-        // Secondary actions live behind an overflow menu so "Send to Spoolman"
-        // reads as the one thing this screen wants you to do.
-        var menuExpanded by remember { mutableStateOf(false) }
-        Box {
-            TextButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("More actions")
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("Copy JSON") },
-                    onClick = {
-                        clipboard.setText(AnnotatedString(viewModel.recordJson(record)))
-                        menuExpanded = false
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Share") },
-                    onClick = {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, viewModel.recordJson(record))
-                        }
-                        context.startActivity(Intent.createChooser(send, "Share scan"))
-                        menuExpanded = false
-                    },
-                )
-                if (showWriteTagOption && record.filament != null) {
-                    DropdownMenuItem(
-                        text = { Text("Write tag…") },
-                        onClick = { showWriteDialog = true; menuExpanded = false },
-                    )
-                }
-                if (showRawDumpButton) {
-                    DropdownMenuItem(
-                        text = { Text("View raw memory") },
-                        onClick = { onViewRawDump(); menuExpanded = false },
-                    )
-                }
-            }
-        }
-    }
-}
-
 /** Full-screen page for the per-page hex dump; opened from the "View raw memory" button. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -514,42 +453,12 @@ private fun RawMemoryScreen(record: ScanRecord, onBack: () -> Unit) {
     }
 }
 
-@Composable
-private fun SendToSpoolmanRow(sendState: SendState, onSend: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onSend, enabled = sendState != SendState.Sending) {
-            if (sendState == SendState.Sending) {
-                CircularProgressIndicator(
-                    Modifier.size(18.dp),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(if (sendState == SendState.Sending) "Sending…" else "Send to Spoolman")
-        }
-        when (sendState) {
-            is SendState.Success -> Text(
-                "✓ ${sendState.message}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            is SendState.Error -> Text(
-                sendState.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            else -> Unit
-        }
-    }
-}
-
 /**
  * Edit-then-arm dialog: fields are prefilled from the last scan; confirming
  * arms a write so the next tag presented gets the encoded data.
  */
 @Composable
-private fun WriteTagDialog(
+fun WriteTagDialog(
     initial: FilamentInfo,
     onArm: (FilamentInfo) -> Unit,
     onDismiss: () -> Unit,
@@ -750,7 +659,7 @@ private fun SettingsDialog(
 }
 
 @Composable
-private fun FilamentCard(info: FilamentInfo) {
+fun FilamentCard(info: FilamentInfo) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Filament", style = MaterialTheme.typography.titleMedium)
@@ -766,7 +675,7 @@ private fun FilamentCard(info: FilamentInfo) {
     }
 }
 
-private fun tempRange(min: Int?, max: Int?): String = when {
+fun tempRange(min: Int?, max: Int?): String = when {
     min != null && max != null -> "$min–$max °C"
     min != null -> "$min °C"
     max != null -> "$max °C"
@@ -774,7 +683,7 @@ private fun tempRange(min: Int?, max: Int?): String = when {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+fun InfoRow(label: String, value: String) {
     Row {
         Text(
             label,
@@ -787,7 +696,7 @@ private fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-private fun ColorRow(colorHex: String) {
+fun ColorRow(colorHex: String) {
     val swatch = remember(colorHex) {
         colorHex.toLongOrNull(16)?.let { Color(0xFF000000L or it) }
     }
@@ -812,7 +721,7 @@ private fun ColorRow(colorHex: String) {
 }
 
 @Composable
-private fun TagInfoCard(record: ScanRecord) {
+fun TagInfoCard(record: ScanRecord) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Tag", style = MaterialTheme.typography.titleMedium)

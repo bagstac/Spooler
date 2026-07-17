@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.bsbagley.spooler.data.ScanHistoryStore
 import com.bsbagley.spooler.data.ScanRecord
 import com.bsbagley.spooler.data.SettingsStore
+import com.bsbagley.spooler.filamentdb.OpenFilamentDatabaseClient
 import com.bsbagley.spooler.nfc.TagReader
 import com.bsbagley.spooler.nfc.toHex
 import com.bsbagley.spooler.spoolman.SpoolmanClient
@@ -35,6 +36,13 @@ sealed interface SendState {
     data object Sending : SendState
     data class Success(val message: String) : SendState
     data class Error(val message: String) : SendState
+}
+
+sealed interface LookupState {
+    data object Idle : LookupState
+    data object Loading : LookupState
+    data class Found(val result: OpenFilamentDatabaseClient.LookupResult) : LookupState
+    data class NotFound(val message: String) : LookupState
 }
 
 sealed interface WriteState {
@@ -74,6 +82,9 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _writeState = MutableStateFlow<WriteState>(WriteState.Idle)
     val writeState: StateFlow<WriteState> = _writeState.asStateFlow()
+
+    private val _lookupState = MutableStateFlow<LookupState>(LookupState.Idle)
+    val lookupState: StateFlow<LookupState> = _lookupState.asStateFlow()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -158,6 +169,17 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         _sendState.value = SendState.Idle
     }
 
+    /** Returns Main Screen to the idle "hold a tag / enter new spool" state. */
+    fun clearResult() {
+        _uiState.value = ScanUiState.Idle
+        _sendState.value = SendState.Idle
+    }
+
+    /** Clears any stale Spoolman send result — call whenever a fresh manual-entry form opens. */
+    fun resetSend() {
+        _sendState.value = SendState.Idle
+    }
+
     fun setSpoolmanUrl(url: String) {
         settings.spoolmanUrl = url
         _spoolmanUrl.value = settings.spoolmanUrl
@@ -179,6 +201,18 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             _sendState.value = SendState.Error("Nothing to send — this scan didn't decode.")
             return
         }
+        sendFilamentToSpoolman(filament, record.uidHex)
+    }
+
+    /**
+     * Sends a manually-entered filament (e.g. from an OCR-read printed label,
+     * which has no NFC UID to dedupe on) to Spoolman under a synthetic UID.
+     */
+    fun sendManualEntryToSpoolman(info: FilamentInfo) {
+        sendFilamentToSpoolman(info, "manual-${System.currentTimeMillis()}")
+    }
+
+    private fun sendFilamentToSpoolman(filament: FilamentInfo, dedupeUid: String) {
         if (_spoolmanUrl.value.isBlank()) {
             _sendState.value = SendState.Error("Set your Spoolman URL first (⚙ in the top bar).")
             return
@@ -187,7 +221,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             _sendState.value = try {
                 when (val result = SpoolmanClient(_spoolmanUrl.value)
-                    .importTag(filament, record.uidHex)) {
+                    .importTag(filament, dedupeUid)) {
                     is SpoolmanClient.ImportResult.Created -> SendState.Success(
                         "Created spool #${result.spoolId} (${result.filamentName}" +
                             (result.estimatedWeightG?.let { ", ≈$it g" } ?: "") + ")"
@@ -200,6 +234,40 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 SendState.Error(e.message ?: "Failed to reach Spoolman.")
             }
         }
+    }
+
+    /**
+     * Looks up color hex, printing temps, diameter, and length from the Open
+     * Filament Database once brand + material + color name are known, so the
+     * user isn't forced to photograph every remaining field. Matches on the
+     * color's name (e.g. "White"), not an RGB guess — label text gives color
+     * words, not hex codes, and name matching is exact where hex-distance
+     * matching against an OCR guess would only ever be approximate. Any miss
+     * (no match, or unreachable) leaves the caller's fields untouched — they
+     * fall back to photo capture.
+     */
+    fun lookupFilamentDetails(brand: String, material: String, colorName: String) {
+        _lookupState.value = LookupState.Loading
+        viewModelScope.launch(Dispatchers.IO) {
+            _lookupState.value = try {
+                val result = OpenFilamentDatabaseClient.lookup(brand, material, colorName)
+                if (result != null) {
+                    LookupState.Found(result)
+                } else {
+                    LookupState.NotFound(
+                        "No match in the Open Filament Database — capture the rest from photos.",
+                    )
+                }
+            } catch (e: Exception) {
+                LookupState.NotFound(
+                    "Couldn't reach the Open Filament Database — capture the rest from photos.",
+                )
+            }
+        }
+    }
+
+    fun resetLookup() {
+        _lookupState.value = LookupState.Idle
     }
 
     fun clearHistory() {

@@ -24,6 +24,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Nfc
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,6 +34,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,11 +54,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bsbagley.spooler.NfcStatus
@@ -89,10 +95,27 @@ fun MainScreen(
     // Non-null while the full-screen raw memory page is open.
     var rawDumpRecord by remember { mutableStateOf<ScanRecord?>(null) }
     var showHistoryPage by remember { mutableStateOf(false) }
+    var showLabelReview by remember { mutableStateOf(false) }
+    val sendState by viewModel.sendState.collectAsState()
+    val lookupState by viewModel.lookupState.collectAsState()
 
     rawDumpRecord?.let { record ->
         BackHandler { rawDumpRecord = null }
         RawMemoryScreen(record, onBack = { rawDumpRecord = null })
+        return
+    }
+
+    if (showLabelReview) {
+        BackHandler { showLabelReview = false }
+        LabelReviewScreen(
+            sendState = sendState,
+            lookupState = lookupState,
+            onSend = viewModel::sendManualEntryToSpoolman,
+            onArmWrite = { info -> viewModel.armWrite(info); showLabelReview = false },
+            onLookup = viewModel::lookupFilamentDetails,
+            onDismissLookup = viewModel::resetLookup,
+            onBack = { showLabelReview = false; viewModel.resetLookup() },
+        )
         return
     }
 
@@ -125,7 +148,7 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Spooler") },
+                title = { Text("Main Screen") },
                 actions = {
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
@@ -207,7 +230,46 @@ fun MainScreen(
 
             when (val state = uiState) {
                 ScanUiState.Idle -> item {
-                    StatusCard("Hold an Anycubic filament tag against the back of the phone.")
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ActionCard(
+                            icon = Icons.Filled.Nfc,
+                            title = "Scan a Tag",
+                            description = "Hold an Anycubic filament tag against the back of the phone.",
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            HorizontalDivider(Modifier.weight(1f))
+                            Text(
+                                "OR",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            HorizontalDivider(Modifier.weight(1f))
+                        }
+                        ActionCard(
+                            icon = Icons.Filled.PhotoCamera,
+                            title = "Enter Manually",
+                            description = "No tag? Capture or type in details from a printed label.",
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    // Clear any stale lookup/send result from a previous
+                                    // spool before showing the fresh (blank) form.
+                                    viewModel.resetLookup()
+                                    viewModel.resetSend()
+                                    showLabelReview = true
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Enter New Spool")
+                            }
+                        }
+                    }
                 }
                 ScanUiState.Reading -> item {
                     StatusCard("Reading tag…", showProgress = true)
@@ -232,7 +294,11 @@ fun MainScreen(
                     OutlinedButton(
                         onClick = { showHistoryPage = true },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("History (${history.size})") }
+                    ) {
+                        Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("History (${history.size})")
+                    }
                 }
             }
         }
@@ -257,6 +323,43 @@ private fun StatusCard(message: String, isError: Boolean = false, showProgress: 
         ) {
             if (showProgress) CircularProgressIndicator(Modifier.size(24.dp))
             Text(message, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+/** One of the two idle-state options ("Scan a Tag" / "Enter Manually") — icon, title, description, optional action. */
+@Composable
+private fun ActionCard(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    content: @Composable (() -> Unit)? = null,
+) {
+    Card {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            content?.let {
+                Spacer(Modifier.size(4.dp))
+                it()
+            }
         }
     }
 }
@@ -312,6 +415,11 @@ private fun ResultSection(
         if (showRawDumpButton) {
             OutlinedButton(onClick = onViewRawDump) { Text("View raw memory") }
         }
+
+        OutlinedButton(
+            onClick = viewModel::clearResult,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Clear") }
     }
 }
 
@@ -322,7 +430,7 @@ private fun RawMemoryScreen(record: ScanRecord, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Raw memory") },
+                title = { Text("Raw Memory Screen") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -653,7 +761,7 @@ private fun HistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("History (${history.size})") },
+                title = { Text("History Screen (${history.size})") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

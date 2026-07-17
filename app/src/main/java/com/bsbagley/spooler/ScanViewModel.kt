@@ -80,6 +80,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _showHistory = MutableStateFlow(settings.showHistory)
     val showHistory: StateFlow<Boolean> = _showHistory.asStateFlow()
 
+    private val _showWriteTag = MutableStateFlow(settings.showWriteTag)
+    val showWriteTag: StateFlow<Boolean> = _showWriteTag.asStateFlow()
+
+    private val _spoolmanEnabled = MutableStateFlow(settings.spoolmanEnabled)
+    val spoolmanEnabled: StateFlow<Boolean> = _spoolmanEnabled.asStateFlow()
+
     private val _writeState = MutableStateFlow<WriteState>(WriteState.Idle)
     val writeState: StateFlow<WriteState> = _writeState.asStateFlow()
 
@@ -195,6 +201,16 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         _showHistory.value = enabled
     }
 
+    fun setShowWriteTag(enabled: Boolean) {
+        settings.showWriteTag = enabled
+        _showWriteTag.value = enabled
+    }
+
+    fun setSpoolmanEnabled(enabled: Boolean) {
+        settings.spoolmanEnabled = enabled
+        _spoolmanEnabled.value = enabled
+    }
+
     /** Creates (or finds) the spool in Spoolman for this scan's decoded filament. */
     fun sendToSpoolman(record: ScanRecord) {
         val filament = record.filament ?: run {
@@ -255,12 +271,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     LookupState.Found(result)
                 } else {
                     LookupState.NotFound(
-                        "No match in the Open Filament Database — capture the rest from photos.",
+                        "Not found in the Open Filament Database. Enter the remaining details manually or by photo.",
                     )
                 }
             } catch (e: Exception) {
                 LookupState.NotFound(
-                    "Couldn't reach the Open Filament Database — capture the rest from photos.",
+                    "Couldn't reach the Open Filament Database. Enter the remaining details manually or by photo.",
                 )
             }
         }

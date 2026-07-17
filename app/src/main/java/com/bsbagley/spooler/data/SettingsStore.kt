@@ -27,10 +27,26 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_SHOW_HISTORY, value).apply()
         }
 
+    /** On by default — writing tags is a core feature, this is an opt-out for people who never write. */
+    var showWriteTag: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_WRITE_TAG, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SHOW_WRITE_TAG, value).apply()
+        }
+
+    /** On by default — Spoolman is a core feature, this is an opt-out for people who don't use it. */
+    var spoolmanEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SPOOLMAN_ENABLED, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SPOOLMAN_ENABLED, value).apply()
+        }
+
     companion object {
         private const val KEY_SPOOLMAN_URL = "spoolman_url"
         private const val KEY_SHOW_RAW_DUMP = "show_raw_dump"
         private const val KEY_SHOW_HISTORY = "show_history"
+        private const val KEY_SHOW_WRITE_TAG = "show_write_tag"
+        private const val KEY_SPOOLMAN_ENABLED = "spoolman_enabled"
 
         /** Blank until the user configures their instance (settings dialog opens on first launch). */
         const val DEFAULT_SPOOLMAN_URL = ""

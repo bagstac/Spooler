@@ -71,29 +71,46 @@ Run unit tests (decoder): right-click `AnycubicDecoderTest` → Run, or
 
 ## Using it
 
-Open the app and hold a filament tag against the upper back of the phone. The
-app reads pages 0–44 (stopping gracefully wherever the clone chip NAKs),
-decodes the Anycubic layout, saves the scan to history, and shows:
+**Main Screen** offers two entry points: hold a filament tag against the
+upper back of the phone (reads pages 0–44, stopping gracefully wherever the
+clone chip NAKs, decodes the Anycubic layout, saves to history), or tap
+**Enter New Spool** for a tagless spool. A scan result shows:
 
 - **Filament card** — SKU, brand, material, color swatch, temps, diameter, length
 - **Tag card** — UID, ATQA, SAK, pages read
-- **Raw memory** — hex + ASCII per page
-- **Copy JSON / Share** — full scan record for feeding Spoolman workflows
-- **Send to Spoolman** — see [Spoolman integration](#spoolman-integration)
-- **Write tag…** — edit the scanned values and arm a write; the next tag held
-  to the phone is overwritten (`WRITE 0xA2`, pages 4–31 only — UID and lock
-  pages are never touched) and verified by read-back
-- **Enter New Spool** — no tag? Camera + on-device OCR reads a printed label
-  field-by-field (tap a camera icon on any field), with a manual-entry
-  fallback and an [Open Filament Database](https://api.openfilamentdatabase.org)
-  lookup to fill in temps/diameter/length once brand + material + color are known
+- **Send to Spoolman** — the primary action; see [Spoolman integration](#spoolman-integration)
+- **More actions** (overflow menu) — Copy JSON, Share, Write tag…, View raw memory
+- **↻ New scan** (top bar) — clears the result and returns to the idle state
+
+**Spool Info** (opened via "Enter New Spool") is a manual-entry form with a
+camera icon on every field for OCR capture from a printed label:
+- **Identify the Filament** — Brand, Material, Color name; filling in all
+  three automatically triggers an [Open Filament Database](https://api.openfilamentdatabase.org)
+  lookup (debounced ~600ms after you stop typing) to fill in the rest
+- **Other Details** (collapsed by default) — SKU, color hex, extruder/bed
+  temps, diameter, length — usually filled by the lookup above
+- **Send to Spoolman** is pinned to the bottom of the screen
+
+**Write tag…** (from either screen) edits the filament values and arms a
+write; the next tag held to the phone is overwritten (`WRITE 0xA2`, pages
+4–31 only — UID and lock pages are never touched) and verified by read-back.
+
+### Settings (⚙)
+
+- **Spoolman URL** — see [Spoolman integration](#spoolman-integration)
+- **Enable Spoolman** (on by default) — hides all "Send to Spoolman" buttons when off
+- **Show write NFC tag option** (on by default) — hides all "Write tag…" buttons when off
+- **Show raw memory dump** (off by default) — adds a "View raw memory" action
+- **Show history** (off by default) — adds a History button listing past scans
 
 ## Spoolman integration
 
 Spooler talks directly to **your own [Spoolman](https://github.com/Donkie/Spoolman)
 instance** over its REST API — nothing goes through a third-party server.
 This has been built and tested against a local Spoolman running in Docker
-(both on a PC and on a Raspberry Pi).
+(both on a PC and on a Raspberry Pi). Turn it off entirely via ⚙ Settings →
+**Enable Spoolman** if you don't run an instance — this hides every "Send to
+Spoolman" button in the app.
 
 **Setup:**
 1. Have a Spoolman instance reachable from your phone (same Wi-Fi/LAN). Any

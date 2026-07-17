@@ -433,7 +433,7 @@ private fun RawMemoryScreen(record: ScanRecord, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Raw Memory Screen") },
+                title = { Text("Raw Memory") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

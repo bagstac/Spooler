@@ -1,19 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Simple filament-spool glyph: outer ring, hub, and a trailing strand. -->
+<!-- Filament wound on a spindle: a vertical rod through four stacked
+     winding loops. All content sits well within the 66% adaptive-icon
+     safe zone (centered 72dp circle) so it isn't clipped by any
+     launcher mask shape. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,30a24,24 0 1,0 0.001,48a24,24 0 1,0 -0.001,-48zM54,37a17,17 0 1,1 -0.001,34a17,17 0 1,1 0.001,-34z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,47a7,7 0 1,0 0.001,14a7,7 0 1,0 -0.001,-14z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,24 L54,84" />
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="3"
         android:fillColor="#00000000"
-        android:pathData="M76,66 C82,72 86,74 92,74" />
+        android:pathData="M39,36 A15,5.5 0 1,0 69,36 A15,5.5 0 1,0 39,36 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M39,49 A15,5.5 0 1,0 69,49 A15,5.5 0 1,0 39,49 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M39,62 A15,5.5 0 1,0 69,62 A15,5.5 0 1,0 39,62 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M39,75 A15,5.5 0 1,0 69,75 A15,5.5 0 1,0 39,75 Z" />
 </vector>

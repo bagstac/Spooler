@@ -28,11 +28,15 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -90,6 +94,8 @@ fun MainScreen(
     val writeState by viewModel.writeState.collectAsState()
     val showRawDump by viewModel.showRawDump.collectAsState()
     val showHistorySetting by viewModel.showHistory.collectAsState()
+    val showWriteTagSetting by viewModel.showWriteTag.collectAsState()
+    val spoolmanEnabledSetting by viewModel.spoolmanEnabled.collectAsState()
     // Prompt for the Spoolman URL on first launch (nothing configured yet).
     var showSettings by remember { mutableStateOf(spoolmanUrl.isBlank()) }
     // Non-null while the full-screen raw memory page is open.
@@ -110,6 +116,8 @@ fun MainScreen(
         LabelReviewScreen(
             sendState = sendState,
             lookupState = lookupState,
+            showWriteTagOption = showWriteTagSetting,
+            spoolmanEnabled = spoolmanEnabledSetting,
             onSend = viewModel::sendManualEntryToSpoolman,
             onArmWrite = { info -> viewModel.armWrite(info); showLabelReview = false },
             onLookup = viewModel::lookupFilamentDetails,
@@ -135,10 +143,14 @@ fun MainScreen(
             currentUrl = spoolmanUrl,
             showRawDump = showRawDump,
             showHistory = showHistorySetting,
-            onSave = { url, rawDumpEnabled, historyEnabled ->
+            showWriteTag = showWriteTagSetting,
+            spoolmanEnabled = spoolmanEnabledSetting,
+            onSave = { url, rawDumpEnabled, historyEnabled, writeTagEnabled, spoolmanEnabled ->
                 viewModel.setSpoolmanUrl(url)
                 viewModel.setShowRawDump(rawDumpEnabled)
                 viewModel.setShowHistory(historyEnabled)
+                viewModel.setShowWriteTag(writeTagEnabled)
+                viewModel.setSpoolmanEnabled(spoolmanEnabled)
                 showSettings = false
             },
             onDismiss = { showSettings = false },
@@ -150,6 +162,11 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("Main Screen") },
                 actions = {
+                    if (uiState is ScanUiState.Result) {
+                        IconButton(onClick = viewModel::clearResult) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "New scan")
+                        }
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -231,10 +248,13 @@ fun MainScreen(
             when (val state = uiState) {
                 ScanUiState.Idle -> item {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Primary path: scanning is the app's core, hardware-driven
+                        // interaction — given a heavier, tonal treatment.
                         ActionCard(
                             icon = Icons.Filled.Nfc,
                             title = "Scan a Tag",
                             description = "Hold an Anycubic filament tag against the back of the phone.",
+                            primary = true,
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -249,21 +269,24 @@ fun MainScreen(
                             )
                             HorizontalDivider(Modifier.weight(1f))
                         }
-                        ActionCard(
-                            icon = Icons.Filled.PhotoCamera,
-                            title = "Enter Manually",
-                            description = "No tag? Capture or type in details from a printed label.",
+                        // Fallback path: no card, no icon — a plain text button so
+                        // it doesn't visually compete with the scan prompt above.
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    // Clear any stale lookup/send result from a previous
-                                    // spool before showing the fresh (blank) form.
-                                    viewModel.resetLookup()
-                                    viewModel.resetSend()
-                                    showLabelReview = true
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
+                            Text(
+                                "No tag? Enter details from a printed label instead.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(onClick = {
+                                // Clear any stale lookup/send result from a previous
+                                // spool before showing the fresh (blank) form.
+                                viewModel.resetLookup()
+                                viewModel.resetSend()
+                                showLabelReview = true
+                            }) {
                                 Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text("Enter New Spool")
@@ -283,6 +306,8 @@ fun MainScreen(
                             record = state.record,
                             viewModel = viewModel,
                             showRawDumpButton = showRawDump,
+                            showWriteTagOption = showWriteTagSetting,
+                            spoolmanEnabled = spoolmanEnabledSetting,
                             onViewRawDump = { rawDumpRecord = state.record },
                         )
                     }
@@ -327,15 +352,22 @@ private fun StatusCard(message: String, isError: Boolean = false, showProgress: 
     }
 }
 
-/** One of the two idle-state options ("Scan a Tag" / "Enter Manually") — icon, title, description, optional action. */
+/** The idle-state "Scan a Tag" option — icon, title, description, optional action. */
 @Composable
 private fun ActionCard(
     icon: ImageVector,
     title: String,
     description: String,
+    primary: Boolean = false,
     content: @Composable (() -> Unit)? = null,
 ) {
-    Card {
+    Card(
+        colors = if (primary) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -346,14 +378,26 @@ private fun ActionCard(
             Icon(
                 icon,
                 contentDescription = null,
-                modifier = Modifier.size(36.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(if (primary) 44.dp else 36.dp),
+                tint = if (primary) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
             )
-            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                title,
+                style = if (primary) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                color = if (primary) MaterialTheme.colorScheme.onPrimaryContainer else Color.Unspecified,
+            )
             Text(
                 description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (primary) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 textAlign = TextAlign.Center,
             )
             content?.let {
@@ -369,6 +413,8 @@ private fun ResultSection(
     record: ScanRecord,
     viewModel: ScanViewModel,
     showRawDumpButton: Boolean,
+    showWriteTagOption: Boolean,
+    spoolmanEnabled: Boolean,
     onViewRawDump: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -392,34 +438,52 @@ private fun ResultSection(
 
         TagInfoCard(record)
 
-        if (record.filament != null) {
+        if (spoolmanEnabled && record.filament != null) {
             SendToSpoolmanRow(sendState, onSend = { viewModel.sendToSpoolman(record) })
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
-                clipboard.setText(AnnotatedString(viewModel.recordJson(record)))
-            }) { Text("Copy JSON") }
-            OutlinedButton(onClick = {
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, viewModel.recordJson(record))
+        // Secondary actions live behind an overflow menu so "Send to Spoolman"
+        // reads as the one thing this screen wants you to do.
+        var menuExpanded by remember { mutableStateOf(false) }
+        Box {
+            TextButton(onClick = { menuExpanded = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("More actions")
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Copy JSON") },
+                    onClick = {
+                        clipboard.setText(AnnotatedString(viewModel.recordJson(record)))
+                        menuExpanded = false
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share") },
+                    onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, viewModel.recordJson(record))
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share scan"))
+                        menuExpanded = false
+                    },
+                )
+                if (showWriteTagOption && record.filament != null) {
+                    DropdownMenuItem(
+                        text = { Text("Write tag…") },
+                        onClick = { showWriteDialog = true; menuExpanded = false },
+                    )
                 }
-                context.startActivity(Intent.createChooser(send, "Share scan"))
-            }) { Text("Share") }
-            if (record.filament != null) {
-                OutlinedButton(onClick = { showWriteDialog = true }) { Text("Write tag…") }
+                if (showRawDumpButton) {
+                    DropdownMenuItem(
+                        text = { Text("View raw memory") },
+                        onClick = { onViewRawDump(); menuExpanded = false },
+                    )
+                }
             }
         }
-
-        if (showRawDumpButton) {
-            OutlinedButton(onClick = onViewRawDump) { Text("View raw memory") }
-        }
-
-        OutlinedButton(
-            onClick = viewModel::clearResult,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Clear") }
     }
 }
 
@@ -585,12 +649,22 @@ private fun SettingsDialog(
     currentUrl: String,
     showRawDump: Boolean,
     showHistory: Boolean,
-    onSave: (url: String, showRawDump: Boolean, showHistory: Boolean) -> Unit,
+    showWriteTag: Boolean,
+    spoolmanEnabled: Boolean,
+    onSave: (
+        url: String,
+        showRawDump: Boolean,
+        showHistory: Boolean,
+        showWriteTag: Boolean,
+        spoolmanEnabled: Boolean,
+    ) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by remember { mutableStateOf(currentUrl) }
     var rawDumpEnabled by remember { mutableStateOf(showRawDump) }
     var historyEnabled by remember { mutableStateOf(showHistory) }
+    var writeTagEnabled by remember { mutableStateOf(showWriteTag) }
+    var spoolmanEnabledState by remember { mutableStateOf(spoolmanEnabled) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
@@ -608,6 +682,20 @@ private fun SettingsDialog(
                     placeholder = { Text("http://192.168.x.x:7912") },
                     singleLine = true,
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Enable Spoolman", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Adds \"Send to Spoolman\" buttons",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = spoolmanEnabledState, onCheckedChange = { spoolmanEnabledState = it })
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -636,10 +724,26 @@ private fun SettingsDialog(
                     }
                     Switch(checked = historyEnabled, onCheckedChange = { historyEnabled = it })
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Show write NFC tag option", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Adds \"Write tag…\" / \"Write to NFC tag…\" buttons",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = writeTagEnabled, onCheckedChange = { writeTagEnabled = it })
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(url, rawDumpEnabled, historyEnabled) }) { Text("Save") }
+            TextButton(onClick = {
+                onSave(url, rawDumpEnabled, historyEnabled, writeTagEnabled, spoolmanEnabledState)
+            }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

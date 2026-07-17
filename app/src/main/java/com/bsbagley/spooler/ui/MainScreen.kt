@@ -482,9 +482,13 @@ fun WriteTagDialog(
         if (material.encodeToByteArray().size > 16) { error = "Material is too long (max 16 bytes)."; return null }
         val d = diameter.toDoubleOrNull()
         if (diameter.isNotBlank() && d == null) { error = "Diameter must be a number."; return null }
+        if (d != null && d !in 0.1..10.0) { error = "Diameter must be between 0.1 and 10 mm."; return null }
         for ((label, v) in listOf("Extruder min" to extMin, "Extruder max" to extMax,
                                   "Bed min" to bedMin, "Bed max" to bedMax, "Length" to length)) {
-            if (v.isNotBlank() && v.toIntOrNull() == null) { error = "$label must be a whole number."; return null }
+            if (v.isBlank()) continue
+            val n = v.toIntOrNull()
+            if (n == null) { error = "$label must be a whole number."; return null }
+            if (n !in 0..65535) { error = "$label must be between 0 and 65535."; return null }
         }
         val hex = colorHex.uppercase()
         return FilamentInfo(
@@ -658,23 +662,6 @@ private fun SettingsDialog(
     )
 }
 
-@Composable
-fun FilamentCard(info: FilamentInfo) {
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Filament", style = MaterialTheme.typography.titleMedium)
-            InfoRow("SKU", info.sku.ifEmpty { "—" })
-            InfoRow("Brand", info.brand.ifEmpty { "—" })
-            InfoRow("Material", info.material.ifEmpty { "—" })
-            ColorRow(info.colorHex)
-            InfoRow("Extruder", tempRange(info.extruderMinC, info.extruderMaxC))
-            InfoRow("Bed", tempRange(info.bedMinC, info.bedMaxC))
-            InfoRow("Diameter", info.diameterMm?.let { "$it mm" } ?: "—")
-            InfoRow("Length", info.lengthMeters?.let { "$it m" } ?: "—")
-        }
-    }
-}
-
 fun tempRange(min: Int?, max: Int?): String = when {
     min != null && max != null -> "$min–$max °C"
     min != null -> "$min °C"
@@ -717,20 +704,6 @@ fun ColorRow(colorHex: String) {
             Spacer(Modifier.width(8.dp))
         }
         Text("#$colorHex", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-fun TagInfoCard(record: ScanRecord) {
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Tag", style = MaterialTheme.typography.titleMedium)
-            InfoRow("UID", record.uidHex)
-            InfoRow("ATQA", "0x${record.atqaHex}")
-            InfoRow("SAK", "0x%02X".format(record.sak))
-            InfoRow("Pages read", "${record.pagesRead}${if (record.complete) "" else " (partial)"}")
-            InfoRow("Scanned", TIME_FORMAT.format(Instant.ofEpochMilli(record.timestampMillis)))
-        }
     }
 }
 

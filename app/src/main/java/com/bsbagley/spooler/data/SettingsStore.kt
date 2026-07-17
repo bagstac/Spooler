@@ -10,7 +10,12 @@ class SettingsStore(context: Context) {
     var spoolmanUrl: String
         get() = prefs.getString(KEY_SPOOLMAN_URL, DEFAULT_SPOOLMAN_URL)!!
         set(value) {
-            prefs.edit().putString(KEY_SPOOLMAN_URL, value.trim().trimEnd('/')).apply()
+            // Strip ALL whitespace, not just the ends — autocorrect likes to
+            // insert a space mid-IP ("192.168. 1.171"), and whitespace is
+            // never valid in a URL anyway.
+            prefs.edit()
+                .putString(KEY_SPOOLMAN_URL, value.filterNot(Char::isWhitespace).trimEnd('/'))
+                .apply()
         }
 
     /** Off by default — raw page hex is debug-level detail, not needed day to day. */

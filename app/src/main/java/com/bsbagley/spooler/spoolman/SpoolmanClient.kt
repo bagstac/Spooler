@@ -1,6 +1,7 @@
 package com.bsbagley.spooler.spoolman
 
 import com.bsbagley.spooler.tag.FilamentInfo
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -148,6 +149,10 @@ class SpoolmanClient(baseUrl: String) {
             // OkHttp throws this (not IOException) for a malformed URL, e.g. a
             // stray space from autocorrect — surface it instead of crashing.
             throw SpoolmanException("Invalid Spoolman URL '$apiBase' (${e.message})")
+        } catch (e: SerializationException) {
+            // A 200 response that isn't JSON — the URL points at something
+            // that answers HTTP but isn't a Spoolman API (router page, proxy).
+            throw SpoolmanException("$apiBase didn't return JSON — is this really a Spoolman server?")
         }
 
     private companion object {

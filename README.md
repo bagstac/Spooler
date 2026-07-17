@@ -2,8 +2,9 @@
 
 Android POC that reads **Anycubic ACE filament NFC tags** and shows the decoded
 filament data (SKU, material, color, temps, diameter, length) plus a raw hex
-dump. Groundwork for pushing spool data into
-[Spoolman](https://github.com/Donkie/Spoolman).
+dump. Built-in **[Spoolman](https://github.com/Donkie/Spoolman) integration**
+sends that data straight to your own Spoolman instance — see
+[Spoolman integration](#spoolman-integration) below.
 
 **Prebuilt APK:** every push to `main` is built and published automatically —
 grab the latest one from the [Releases page](https://github.com/bagstac/Spooler/releases).
@@ -34,12 +35,20 @@ page 29, diameter + length page 30.
 
 ```
 app/src/main/java/com/bsbagley/spooler/
-  MainActivity.kt          NFC reader mode lifecycle, ReaderCallback
-  ScanViewModel.kt         scan orchestration, UI state, history
-  nfc/TagReader.kt         raw Type 2 READ loop (WRITE 0xA2 can slot in later)
-  tag/AnycubicDecoder.kt   byte-layout decoder (ported from SpoolIntegrater PWA)
-  data/ScanHistoryStore.kt JSON-file scan history (capped at 50)
-  ui/MainScreen.kt         Compose UI: filament card, tag info, hex dump, history
+  MainActivity.kt                            NFC reader mode lifecycle, ReaderCallback
+  ScanViewModel.kt                            all UI state (scan/send/write/lookup)
+  nfc/TagReader.kt                            raw Type 2 READ/WRITE loop
+  tag/AnycubicDecoder.kt                      tag bytes -> FilamentInfo
+  tag/AnycubicEncoder.kt                      FilamentInfo -> tag bytes
+  spoolman/SpoolmanClient.kt                  Spoolman REST client
+  ocr/LabelTextRecognizer.kt                  ML Kit text recognition wrapper
+  ocr/LabelFieldParser.kt                     OCR text -> best-guess fields
+  filamentdb/OpenFilamentDatabaseClient.kt    api.openfilamentdatabase.org client
+  data/ScanHistoryStore.kt                    JSON-file scan history (capped at 50)
+  data/SettingsStore.kt                       SharedPreferences wrapper
+  ui/MainScreen.kt                            home screen + several sub-screens
+  ui/LabelReviewScreen.kt                     manual-entry / label-capture form
+  ui/FieldCaptureScreen.kt                    per-field camera capture dialog
 ```
 
 ## Building
@@ -70,11 +79,49 @@ decodes the Anycubic layout, saves the scan to history, and shows:
 - **Tag card** — UID, ATQA, SAK, pages read
 - **Raw memory** — hex + ASCII per page
 - **Copy JSON / Share** — full scan record for feeding Spoolman workflows
-- **Send to Spoolman** — creates the vendor/filament/spool via the REST API
-  (tag UID stored as `lot_nr` for dedupe); set your instance URL via ⚙
+- **Send to Spoolman** — see [Spoolman integration](#spoolman-integration)
 - **Write tag…** — edit the scanned values and arm a write; the next tag held
   to the phone is overwritten (`WRITE 0xA2`, pages 4–31 only — UID and lock
   pages are never touched) and verified by read-back
+- **Enter New Spool** — no tag? Camera + on-device OCR reads a printed label
+  field-by-field (tap a camera icon on any field), with a manual-entry
+  fallback and an [Open Filament Database](https://api.openfilamentdatabase.org)
+  lookup to fill in temps/diameter/length once brand + material + color are known
+
+## Spoolman integration
+
+Spooler talks directly to **your own [Spoolman](https://github.com/Donkie/Spoolman)
+instance** over its REST API — nothing goes through a third-party server.
+This has been built and tested against a local Spoolman running in Docker
+(both on a PC and on a Raspberry Pi).
+
+**Setup:**
+1. Have a Spoolman instance reachable from your phone (same Wi-Fi/LAN). Any
+   standard Spoolman Docker deployment works — see Spoolman's own
+   [installation docs](https://donkie.github.io/Spoolman/) if you don't have
+   one running yet.
+2. In Spooler, tap **⚙ Settings** (opens automatically on first launch) and
+   enter your Spoolman instance's URL, e.g. `http://192.168.1.171:7912` —
+   whatever address and port your instance is reachable at. Tap **Save**.
+
+**Using it:**
+1. Get filament data into the app either by **scanning an Anycubic tag** or
+   by tapping **Enter New Spool** to type in / photograph a printed label.
+2. Once the filament details are showing, tap **Send to Spoolman**.
+3. Spooler will:
+   - find or create the **vendor** (matched by brand name),
+   - find or create the **filament** (matched by vendor + material + color),
+   - create a **spool**, estimating initial weight from length × diameter ×
+     density when the source data doesn't include weight directly.
+4. Re-sending the same physical tag is safe — its UID is stored as the
+   spool's `lot_nr`, so a rescan is recognized as *"already in Spoolman"*
+   rather than creating a duplicate. (Manually-entered spools get a
+   synthetic UID instead, since there's no tag to dedupe on.)
+
+Network trouble reaching a Docker-hosted Spoolman from your phone? The most
+common culprit is a firewall between your LAN and the Docker host (WSL2's
+mirrored networking mode is a known offender on Windows) — running Spoolman
+on a plain Linux box (a Raspberry Pi, a NAS, etc.) sidesteps this entirely.
 
 ## Release signing
 
@@ -109,3 +156,5 @@ the default path with `-PreleaseKeystoreProps=<path>` if needed.
 - [ ] Reliability pass on real tags (read retries, damaged-tag handling)
 - [x] Write support (`WRITE 0xA2`) for re-labeling spools
 - [x] Spoolman integration (create spools via its REST API)
+- [x] Manual/OCR spool entry for tagless spools, with Open Filament Database lookup
+- [ ] Play Store internal testing release

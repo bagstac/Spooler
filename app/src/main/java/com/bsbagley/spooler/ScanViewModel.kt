@@ -113,7 +113,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                     haptics.success()
                     // Show the freshly written tag as a normal scan result.
                     runCatching { readAndRecord(tag) }
-                } catch (e: IOException) {
+                } catch (e: Exception) {
                     _writeState.value = WriteState.Error(
                         "Write failed (${e.message ?: "connection lost"}). " +
                             "The tag may be write-protected or moved too soon — arm and try again."
@@ -130,7 +130,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 readAndRecord(tag)
                 haptics.success()
-            } catch (e: IOException) {
+            } catch (e: Exception) {
                 _uiState.value = ScanUiState.Error(
                     "Tag read failed (${e.message ?: "connection lost"}). " +
                         "Hold the tag still against the back of the phone and try again."
@@ -162,7 +162,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Arms a write: the next tag presented will be overwritten with [info]. */
     fun armWrite(info: FilamentInfo) {
-        _writeState.value = WriteState.Armed(AnycubicEncoder.encode(info))
+        // encode() rejects values that don't fit the tag layout (>16-byte
+        // strings, temps outside int16). The forms validate first, but any
+        // path that slips through must become an error banner, not a crash.
+        _writeState.value = runCatching { AnycubicEncoder.encode(info) }.fold(
+            onSuccess = { WriteState.Armed(it) },
+            onFailure = { WriteState.Error("Can't write this data to a tag: ${it.message}") },
+        )
     }
 
     /** Cancels an armed write or dismisses a write result banner. */
@@ -246,7 +252,10 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                         "Already in Spoolman as spool #${result.spoolId} (matched by tag UID)"
                     )
                 }
-            } catch (e: IOException) {
+            } catch (e: Exception) {
+                // IOException covers network/SpoolmanException; anything else
+                // (unexpected JSON shape from a non-Spoolman server) must also
+                // land here as an error banner, never crash the app.
                 SendState.Error(e.message ?: "Failed to reach Spoolman.")
             }
         }

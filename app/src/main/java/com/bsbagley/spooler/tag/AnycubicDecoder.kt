@@ -50,7 +50,10 @@ object AnycubicDecoder {
             val sb = StringBuilder()
             for (i in at(page) until at(page) + pages * 4) {
                 val v = b(i)
-                if (v == 0) break
+                // Stop at NUL or anything outside printable ASCII — tag bytes
+                // are untrusted input and these strings flow into the UI,
+                // shared JSON, and Spoolman names/comments.
+                if (v < 0x20 || v > 0x7E) break
                 sb.append(v.toChar())
             }
             return sb.toString().trim()

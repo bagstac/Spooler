@@ -175,11 +175,18 @@ fun LabelReviewScreen(
         if (!colorHex.matches(Regex("[0-9a-fA-F]{6}"))) {
             error = "Color must be 6 hex digits (RRGGBB)."; return null
         }
+        // Tag ASCII fields are 16 bytes; numeric fields are unsigned int16.
+        if (sku.trim().encodeToByteArray().size > 16) { error = "SKU is too long (max 16 bytes)."; return null }
+        if (material.trim().encodeToByteArray().size > 16) { error = "Material is too long (max 16 bytes)."; return null }
         val d = diameter.toDoubleOrNull()
         if (diameter.isNotBlank() && d == null) { error = "Diameter must be a number."; return null }
+        if (d != null && d !in 0.1..10.0) { error = "Diameter must be between 0.1 and 10 mm."; return null }
         for ((label, v) in listOf("Extruder min" to extMin, "Extruder max" to extMax,
                                   "Bed min" to bedMin, "Bed max" to bedMax, "Length" to length)) {
-            if (v.isNotBlank() && v.toIntOrNull() == null) { error = "$label must be a whole number."; return null }
+            if (v.isBlank()) continue
+            val n = v.toIntOrNull()
+            if (n == null) { error = "$label must be a whole number."; return null }
+            if (n !in 0..65535) { error = "$label must be between 0 and 65535."; return null }
         }
         error = null
         val hex = colorHex.uppercase()

@@ -76,6 +76,34 @@ decodes the Anycubic layout, saves the scan to history, and shows:
   to the phone is overwritten (`WRITE 0xA2`, pages 4–31 only — UID and lock
   pages are never touched) and verified by read-back
 
+## Release signing
+
+For Play Store internal testing (or any signed release build), `bundleRelease`
+looks for credentials in a properties file **kept outside this public repo**:
+
+```
+~/keystores/spooler-keystore.properties   (forward slashes even on Windows —
+                                            Java .properties treats backslash
+                                            as an escape character)
+```
+
+containing:
+```
+storeFile=C:/Users/you/keystores/spooler-upload.jks
+storePassword=...
+keyAlias=spooler-upload
+keyPassword=...
+```
+
+Generate a keystore once with `keytool -genkeypair` (see git history of
+`app/build.gradle.kts` for the exact command used). **Back up the keystore
+file and password somewhere durable** — with Play App Signing, Google can
+help recover a lost upload key, but it's a support process, not instant.
+
+Without that properties file present, `bundleRelease`/`assembleRelease` still
+build (just unsigned) — a fresh checkout isn't broken by its absence. Override
+the default path with `-PreleaseKeystoreProps=<path>` if needed.
+
 ## Roadmap
 
 - [ ] Reliability pass on real tags (read retries, damaged-tag handling)

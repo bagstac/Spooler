@@ -10,3 +10,9 @@ captures/
 *.apk
 *.aab
 output-metadata.json
+
+# Release signing credentials must never live in this public repo — see
+# README.md "Release signing" for where they actually live.
+*.jks
+*.keystore
+keystore.properties

@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -6,6 +7,19 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// Release signing credentials live OUTSIDE this public repo — never commit a
+// keystore or its passwords. Default location is a keystores folder in the
+// developer's home directory; override with -PreleaseKeystoreProps=<path> if
+// needed (e.g. from CI, pointing at a path written from a secret).
+val releaseKeystorePropsFile = File(
+    (project.findProperty("releaseKeystoreProps") as String?)
+        ?: "${System.getProperty("user.home")}/keystores/spooler-keystore.properties",
+)
+val releaseKeystoreProps = Properties().apply {
+    if (releaseKeystorePropsFile.exists()) releaseKeystorePropsFile.inputStream().use { load(it) }
+}
+val hasReleaseSigning = releaseKeystoreProps.containsKey("storeFile")
 
 android {
     namespace = "com.bsbagley.spooler"
@@ -20,6 +34,17 @@ android {
         versionName = "0.1"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystoreProps.getProperty("storeFile"))
+                storePassword = releaseKeystoreProps.getProperty("storePassword")
+                keyAlias = releaseKeystoreProps.getProperty("keyAlias")
+                keyPassword = releaseKeystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -27,6 +52,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Falls back to unsigned if the keystore properties file isn't
+            // present (e.g. a fresh checkout without the local keystore) —
+            // signingConfig is only set when we actually found credentials.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

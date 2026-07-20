@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import com.bsbagley.spooler.ScanViewModel
 import com.bsbagley.spooler.SendState
 import com.bsbagley.spooler.data.ScanRecord
-import kotlinx.coroutines.delay
 import java.time.Instant
 
 /**
@@ -72,13 +71,13 @@ fun ScanResultScreen(
     var menuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Mirrors Spool Info: a moment to read the confirmation, then back to
-    // Main Screen ready for the next scan. Errors get a snackbar instead of
-    // a permanently-shown line.
+    // Mirrors Spool Info: show the result as a snackbar, then — on success
+    // only — back to Main Screen ready for the next scan once it's been
+    // read (showSnackbar suspends until the snackbar dismisses).
     LaunchedEffect(sendState) {
         when (sendState) {
             is SendState.Success -> {
-                delay(1200)
+                snackbarHostState.showSnackbar(sendState.message)
                 onBack()
             }
             is SendState.Error -> snackbarHostState.showSnackbar(sendState.message)

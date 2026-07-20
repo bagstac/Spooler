@@ -132,14 +132,13 @@ fun LabelReviewScreen(
         }
     }
 
-    // Give the user a moment to read the confirmation, then return to the
-    // main screen — mirrors how a successful tag scan already lands there.
-    // Errors get a snackbar instead of a permanently-shown line needing a
-    // manual dismiss.
+    // Show the result as a snackbar, then — on success only — return to the
+    // main screen once it's been read (showSnackbar suspends until the
+    // snackbar dismisses), mirroring how a successful tag scan lands there.
     LaunchedEffect(sendState) {
         when (sendState) {
             is SendState.Success -> {
-                delay(1200)
+                snackbarHostState.showSnackbar(sendState.message)
                 onBack()
             }
             is SendState.Error -> snackbarHostState.showSnackbar(sendState.message)

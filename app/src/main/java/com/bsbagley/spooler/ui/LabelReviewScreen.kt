@@ -19,11 +19,15 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -52,6 +56,15 @@ import kotlinx.coroutines.delay
 
 private const val TOTAL_FIELD_SLOTS = 9
 
+// Common filament material types for the picker below, sorted alphabetically
+// for display — not the match-priority order LabelFieldParser.MATERIALS
+// uses for OCR text. Also the full set Settings' material-type filter picks
+// from (see SettingsDialog in MainScreen.kt).
+val MATERIAL_OPTIONS = listOf(
+    "PLA", "PLA+", "PLA-CF", "PETG", "PETG-CF", "ABS", "ASA",
+    "TPU", "NYLON", "PC", "HIPS", "PVA", "SILK",
+).sorted()
+
 /**
  * Manual-entry form for a filament sourced from a printed label, with a
  * camera icon on each field (or field group) to capture just that value —
@@ -78,7 +91,12 @@ fun LabelReviewScreen(
     onLookup: (brand: String, material: String, colorName: String) -> Unit,
     onDismissLookup: () -> Unit,
     onBack: () -> Unit,
+    brandNames: List<String> = emptyList(),
+    onLoadBrandNames: () -> Unit = {},
+    materialTypeFilter: Set<String> = emptySet(),
 ) {
+    LaunchedEffect(Unit) { onLoadBrandNames() }
+
     var brand by remember { mutableStateOf("") }
     var sku by remember { mutableStateOf("") }
     var material by remember { mutableStateOf("") }
@@ -156,8 +174,7 @@ fun LabelReviewScreen(
                 onCancel = { captureField = null },
                 onCaptured = { parsed ->
                     applyCapturedField(field, parsed,
-                        setBrand = { brand = it },
-                        setSku = { sku = it }, setMaterial = { material = it },
+                        setSku = { sku = it },
                         setColorHex = { colorHex = it }, setColorName = { colorName = it },
                         setExtMin = { extMin = it },
                         setExtMax = { extMax = it }, setBedMin = { bedMin = it },
@@ -228,6 +245,76 @@ fun LabelReviewScreen(
             }
         },
     )
+
+    @Composable
+    fun materialField() {
+        var expanded by remember { mutableStateOf(false) }
+        // Empty filter means "no filter" — Settings' material-type picker.
+        val visibleOptions = remember(materialTypeFilter) {
+            if (materialTypeFilter.isEmpty()) MATERIAL_OPTIONS else MATERIAL_OPTIONS.filter { it in materialTypeFilter }
+        }
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = material,
+                onValueChange = { material = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryEditable, true),
+                label = { Text("Material") },
+                singleLine = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                visibleOptions.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = { material = option; expanded = false },
+                    )
+                }
+            }
+        }
+    }
+
+    // Autocomplete against the Open Filament Database's brand list (loaded
+    // once per session — see onLoadBrandNames). Suggestions only appear once
+    // the user starts typing, capped so a short prefix like "3D" doesn't
+    // dump dozens of matches into the menu at once.
+    @Composable
+    fun brandField() {
+        var expanded by remember { mutableStateOf(false) }
+        val suggestions = remember(brand, brandNames) {
+            if (brand.isBlank()) emptyList() else brandNames.filter { it.contains(brand, ignoreCase = true) }.take(8)
+        }
+        ExposedDropdownMenuBox(
+            expanded = expanded && suggestions.isNotEmpty(),
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            OutlinedTextField(
+                value = brand,
+                onValueChange = { brand = it; expanded = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryEditable, true),
+                label = { Text("Brand") },
+                singleLine = true,
+            )
+            if (suggestions.isNotEmpty()) {
+                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    suggestions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = { brand = option; expanded = false },
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     val filledSlots = listOf(
         brand.isNotBlank(), sku.isNotBlank(), material.isNotBlank(),
@@ -314,14 +401,8 @@ fun LabelReviewScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                field(
-                    brand, { brand = it }, "Brand",
-                    { captureField = FilamentField.BRAND }, Modifier.fillMaxWidth(),
-                )
-                field(
-                    material, { material = it }, "Material",
-                    { captureField = FilamentField.MATERIAL }, Modifier.fillMaxWidth(),
-                )
+                brandField()
+                materialField()
                 field(
                     colorName, { colorName = it }, "Color name",
                     { captureField = FilamentField.COLOR_NAME }, Modifier.fillMaxWidth(),
@@ -441,9 +522,7 @@ fun LabelReviewScreen(
 private fun applyCapturedField(
     field: FilamentField,
     parsed: ParsedFields,
-    setBrand: (String) -> Unit,
     setSku: (String) -> Unit,
-    setMaterial: (String) -> Unit,
     setColorHex: (String) -> Unit,
     setColorName: (String) -> Unit,
     setExtMin: (String) -> Unit,
@@ -454,9 +533,7 @@ private fun applyCapturedField(
     setLength: (String) -> Unit,
 ) {
     when (field) {
-        FilamentField.BRAND -> parsed.brand?.let(setBrand)
         FilamentField.SKU -> parsed.sku?.let(setSku)
-        FilamentField.MATERIAL -> parsed.material?.let(setMaterial)
         FilamentField.COLOR -> parsed.colorHex?.let(setColorHex)
         FilamentField.COLOR_NAME -> parsed.colorName?.let(setColorName)
         FilamentField.EXTRUDER_TEMP -> {

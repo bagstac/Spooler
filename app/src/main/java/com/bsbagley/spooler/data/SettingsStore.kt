@@ -46,12 +46,20 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_SPOOLMAN_ENABLED, value).apply()
         }
 
+    /** Empty means "no filter" — show every material type. Non-empty restricts the Spool Info Material picker to just these. */
+    var materialTypeFilter: Set<String>
+        get() = prefs.getStringSet(KEY_MATERIAL_TYPE_FILTER, emptySet())!!
+        set(value) {
+            prefs.edit().putStringSet(KEY_MATERIAL_TYPE_FILTER, value).apply()
+        }
+
     companion object {
         private const val KEY_SPOOLMAN_URL = "spoolman_url"
         private const val KEY_SHOW_RAW_DUMP = "show_raw_dump"
         private const val KEY_SHOW_HISTORY = "show_history"
         private const val KEY_SHOW_WRITE_TAG = "show_write_tag"
         private const val KEY_SPOOLMAN_ENABLED = "spoolman_enabled"
+        private const val KEY_MATERIAL_TYPE_FILTER = "material_type_filter"
 
         /** Blank until the user configures their instance (settings dialog opens on first launch). */
         const val DEFAULT_SPOOLMAN_URL = ""

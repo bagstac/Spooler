@@ -20,9 +20,7 @@ data class ParsedFields(
 
 /** One capturable field (or field group) in the filament form, targeted by its own photo. */
 enum class FilamentField(val label: String, val instructions: String) {
-    BRAND("Brand", "Point the camera at the brand name or logo"),
     SKU("SKU", "Point the camera at the SKU or item number"),
-    MATERIAL("Material", "Point the camera at the material name (PLA, PETG, ABS…)"),
     COLOR("Color hex", "Point the camera at a printed hex color code, if there is one"),
     COLOR_NAME("Color name", "Point the camera at the color name (e.g. \"White\")"),
     EXTRUDER_TEMP("Extruder temp", "Point the camera at the nozzle/extruder temperature"),

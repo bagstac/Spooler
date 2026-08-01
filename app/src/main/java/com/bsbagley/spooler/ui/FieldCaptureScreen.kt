@@ -302,9 +302,7 @@ private fun ManualFieldPanel(field: FilamentField, onSave: (ParsedFields) -> Uni
                     onClick = {
                         onSave(
                             when (field) {
-                                FilamentField.BRAND -> ParsedFields(brand = value)
                                 FilamentField.SKU -> ParsedFields(sku = value)
-                                FilamentField.MATERIAL -> ParsedFields(material = value)
                                 FilamentField.COLOR -> ParsedFields(
                                     colorHex = value.removePrefix("#").uppercase(),
                                 )
@@ -324,9 +322,7 @@ private fun ManualFieldPanel(field: FilamentField, onSave: (ParsedFields) -> Uni
 }
 
 private fun displayValue(field: FilamentField, p: ParsedFields): String? = when (field) {
-    FilamentField.BRAND -> p.brand
     FilamentField.SKU -> p.sku
-    FilamentField.MATERIAL -> p.material
     FilamentField.COLOR -> p.colorHex?.let { "#$it" }
     FilamentField.COLOR_NAME -> p.colorName
     FilamentField.EXTRUDER_TEMP -> formatRange(p.extruderMinC, p.extruderMaxC)

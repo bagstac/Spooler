@@ -4,6 +4,7 @@ import android.app.Application
 import android.nfc.Tag
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.bsbagley.spooler.data.BrandNamesStore
 import com.bsbagley.spooler.data.ScanHistoryStore
 import com.bsbagley.spooler.data.ScanRecord
 import com.bsbagley.spooler.data.SettingsStore
@@ -59,6 +60,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     private val store = ScanHistoryStore(app)
     private val settings = SettingsStore(app)
+    private val brandNamesStore = BrandNamesStore(app)
     private val haptics = Haptics(app)
     private val prettyJson = Json { prettyPrint = true }
 
@@ -86,16 +88,26 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _spoolmanEnabled = MutableStateFlow(settings.spoolmanEnabled)
     val spoolmanEnabled: StateFlow<Boolean> = _spoolmanEnabled.asStateFlow()
 
+    private val _materialTypeFilter = MutableStateFlow(settings.materialTypeFilter)
+    val materialTypeFilter: StateFlow<Set<String>> = _materialTypeFilter.asStateFlow()
+
     private val _writeState = MutableStateFlow<WriteState>(WriteState.Idle)
     val writeState: StateFlow<WriteState> = _writeState.asStateFlow()
 
     private val _lookupState = MutableStateFlow<LookupState>(LookupState.Idle)
     val lookupState: StateFlow<LookupState> = _lookupState.asStateFlow()
 
+    private val _brandNames = MutableStateFlow<List<String>>(emptyList())
+    val brandNames: StateFlow<List<String>> = _brandNames.asStateFlow()
+
+    private val _brandNamesRefreshing = MutableStateFlow(false)
+    val brandNamesRefreshing: StateFlow<Boolean> = _brandNamesRefreshing.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _history.value = store.loadAll()
         }
+        loadBrandNames()
     }
 
     /** Entry point from NfcAdapter.ReaderCallback — called on a binder thread. */
@@ -217,6 +229,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         _spoolmanEnabled.value = enabled
     }
 
+    /** Empty [filter] means no filter — every material type shows in Spool Info's picker. */
+    fun setMaterialTypeFilter(filter: Set<String>) {
+        settings.materialTypeFilter = filter
+        _materialTypeFilter.value = filter
+    }
+
     /** Creates (or finds) the spool in Spoolman for this scan's decoded filament. */
     fun sendToSpoolman(record: ScanRecord) {
         val filament = record.filament ?: run {
@@ -293,6 +311,44 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resetLookup() {
         _lookupState.value = LookupState.Idle
+    }
+
+    /**
+     * Populates the Brand field's autocomplete list: the local cache if one
+     * exists, otherwise a one-time fetch from the Open Filament Database
+     * (persisted to the cache for every launch after this one). Called from
+     * init, so this normally happens at app startup; Spool Info also calls
+     * it when opened as a safety net in case that first attempt had no
+     * network yet.
+     */
+    fun loadBrandNames() {
+        if (_brandNames.value.isNotEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val cached = brandNamesStore.loadAll()
+            if (cached.isNotEmpty()) {
+                _brandNames.value = cached
+                return@launch
+            }
+            val fetched = runCatching { OpenFilamentDatabaseClient.listBrandNames() }.getOrDefault(emptyList())
+            if (fetched.isNotEmpty()) {
+                _brandNames.value = fetched
+                brandNamesStore.save(fetched)
+            }
+        }
+    }
+
+    /** Settings' "Refresh" action: re-fetches from the Open Filament Database regardless of what's cached. */
+    fun refreshBrandNames() {
+        if (_brandNamesRefreshing.value) return
+        _brandNamesRefreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val fetched = runCatching { OpenFilamentDatabaseClient.listBrandNames() }.getOrDefault(emptyList())
+            if (fetched.isNotEmpty()) {
+                _brandNames.value = fetched
+                brandNamesStore.save(fetched)
+            }
+            _brandNamesRefreshing.value = false
+        }
     }
 
     fun clearHistory() {

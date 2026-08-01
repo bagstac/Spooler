@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -109,15 +110,20 @@ fun MainScreen(
 
     if (showLabelReview) {
         BackHandler { showLabelReview = false }
+        val brandNames by viewModel.brandNames.collectAsState()
+        val materialTypeFilter by viewModel.materialTypeFilter.collectAsState()
         LabelReviewScreen(
             sendState = sendState,
             lookupState = lookupState,
             showWriteTagOption = showWriteTagSetting,
             spoolmanEnabled = spoolmanEnabledSetting,
+            brandNames = brandNames,
             onSend = viewModel::sendManualEntryToSpoolman,
             onArmWrite = { info -> viewModel.armWrite(info); showLabelReview = false },
             onLookup = viewModel::lookupFilamentDetails,
             onDismissLookup = viewModel::resetLookup,
+            onLoadBrandNames = viewModel::loadBrandNames,
+            materialTypeFilter = materialTypeFilter,
             onBack = { showLabelReview = false; viewModel.resetLookup() },
         )
         return
@@ -150,12 +156,16 @@ fun MainScreen(
     }
 
     if (showSettings) {
+        val brandNamesRefreshing by viewModel.brandNamesRefreshing.collectAsState()
+        val materialTypeFilter by viewModel.materialTypeFilter.collectAsState()
         SettingsDialog(
             currentUrl = spoolmanUrl,
             showRawDump = showRawDump,
             showHistory = showHistorySetting,
             showWriteTag = showWriteTagSetting,
             spoolmanEnabled = spoolmanEnabledSetting,
+            brandNamesRefreshing = brandNamesRefreshing,
+            materialTypeFilter = materialTypeFilter,
             onSave = { url, rawDumpEnabled, historyEnabled, writeTagEnabled, spoolmanEnabled ->
                 viewModel.setSpoolmanUrl(url)
                 viewModel.setShowRawDump(rawDumpEnabled)
@@ -164,6 +174,8 @@ fun MainScreen(
                 viewModel.setSpoolmanEnabled(spoolmanEnabled)
                 showSettings = false
             },
+            onRefreshBrandNames = viewModel::refreshBrandNames,
+            onSetMaterialTypeFilter = viewModel::setMaterialTypeFilter,
             onDismiss = { showSettings = false },
         )
     }
@@ -564,6 +576,8 @@ private fun SettingsDialog(
     showHistory: Boolean,
     showWriteTag: Boolean,
     spoolmanEnabled: Boolean,
+    brandNamesRefreshing: Boolean,
+    materialTypeFilter: Set<String>,
     onSave: (
         url: String,
         showRawDump: Boolean,
@@ -571,12 +585,15 @@ private fun SettingsDialog(
         showWriteTag: Boolean,
         spoolmanEnabled: Boolean,
     ) -> Unit,
+    onRefreshBrandNames: () -> Unit,
+    onSetMaterialTypeFilter: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by remember { mutableStateOf(currentUrl) }
     var rawDumpEnabled by remember { mutableStateOf(showRawDump) }
     var historyEnabled by remember { mutableStateOf(showHistory) }
     var writeTagEnabled by remember { mutableStateOf(showWriteTag) }
+    var showMaterialTypeFilter by remember { mutableStateOf(false) }
     var spoolmanEnabledState by remember { mutableStateOf(spoolmanEnabled) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -651,12 +668,107 @@ private fun SettingsDialog(
                     }
                     Switch(checked = writeTagEnabled, onCheckedChange = { writeTagEnabled = it })
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Filament brand list", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Used for the Brand autocomplete in Spool Info",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (brandNamesRefreshing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        TextButton(onClick = onRefreshBrandNames) { Text("Refresh") }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Material types", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (materialTypeFilter.isEmpty()) {
+                                "Showing all types in Spool Info"
+                            } else {
+                                "Showing ${materialTypeFilter.size} of ${MATERIAL_OPTIONS.size} types in Spool Info"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { showMaterialTypeFilter = true }) { Text("Choose…") }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 onSave(url, rawDumpEnabled, historyEnabled, writeTagEnabled, spoolmanEnabledState)
             }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+
+    if (showMaterialTypeFilter) {
+        MaterialTypeFilterDialog(
+            currentFilter = materialTypeFilter,
+            onSave = { onSetMaterialTypeFilter(it); showMaterialTypeFilter = false },
+            onDismiss = { showMaterialTypeFilter = false },
+        )
+    }
+}
+
+/** Checklist of MATERIAL_OPTIONS — empty selection is disallowed (would leave Spool Info's Material picker with nothing to show). */
+@Composable
+private fun MaterialTypeFilterDialog(
+    currentFilter: Set<String>,
+    onSave: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // An empty stored filter means "no filter" (show everything) — start
+    // the checklist with every box checked to reflect that actual state.
+    var selected by remember {
+        mutableStateOf(currentFilter.ifEmpty { MATERIAL_OPTIONS.toSet() })
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Material types") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "Choose which material types appear in Spool Info's Material picker.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MATERIAL_OPTIONS.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selected = if (option in selected) selected - option else selected + option
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = option in selected,
+                            onCheckedChange = { checked ->
+                                selected = if (checked) selected + option else selected - option
+                            },
+                        )
+                        Text(option, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(selected) }, enabled = selected.isNotEmpty()) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

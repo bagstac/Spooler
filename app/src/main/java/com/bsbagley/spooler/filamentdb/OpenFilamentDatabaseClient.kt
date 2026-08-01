@@ -121,6 +121,26 @@ object OpenFilamentDatabaseClient {
         )
     }
 
+    /**
+     * All brand names in the database, alphabetized — for the manual-entry
+     * form's Brand autocomplete. Blocking; call from Dispatchers.IO. Skips
+     * brands with zero listed materials, since a lookup against those could
+     * never succeed anyway. Returns an empty list on any network failure —
+     * the Brand field stays a plain editable text field either way.
+     */
+    fun listBrandNames(): List<String> {
+        val brandsIndex = getJson("$BASE/index.json") ?: return emptyList()
+        return extractBrandNames(brandsIndex)
+    }
+
+    internal fun extractBrandNames(brandsIndex: JsonObject): List<String> =
+        brandsIndex["brands"]?.jsonArray
+            ?.mapNotNull { it as? JsonObject }
+            ?.filter { (it["material_count"]?.jsonPrimitive?.intOrNull ?: 0) > 0 }
+            ?.mapNotNull { it["name"]?.jsonPrimitive?.content }
+            ?.sorted()
+            ?: emptyList()
+
     private fun getJson(url: String): JsonObject? {
         val text = try {
             val req = Request.Builder().url(url).build()

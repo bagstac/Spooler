@@ -2,6 +2,7 @@ package com.bsbagley.spooler.filamentdb
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -88,5 +89,26 @@ class OpenFilamentDatabaseClientTest {
         // 1kg of 1.75mm PLA-density filament is roughly 330m, same reference point used elsewhere in the app.
         val length = OpenFilamentDatabaseClient.estimateLengthMeters(1000, 1.75)
         assertTrue("expected ~330m, got $length", kotlin.math.abs(length - 330) <= 15)
+    }
+
+    @Test
+    fun extractBrandNamesSortsAndSkipsBrandsWithNoMaterials() {
+        val index = json.parseToJsonElement(
+            """{"brands":[
+                {"name":"eSUN","material_count":12},
+                {"name":"Anycubic","material_count":3},
+                {"name":"Empty Brand","material_count":0}
+            ]}""",
+        ).jsonObject
+        assertEquals(
+            listOf("Anycubic", "eSUN"),
+            OpenFilamentDatabaseClient.extractBrandNames(index),
+        )
+    }
+
+    @Test
+    fun extractBrandNamesReturnsEmptyListWhenBrandsFieldMissing() {
+        val index = json.parseToJsonElement("""{}""").jsonObject
+        assertEquals(emptyList<String>(), OpenFilamentDatabaseClient.extractBrandNames(index))
     }
 }

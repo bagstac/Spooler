@@ -28,7 +28,7 @@ page 29, diameter + length page 30.
 ## Stack
 
 - Kotlin 2.1, Jetpack Compose (Material 3), kotlinx.serialization
-- minSdk 34 (Pixel 8 Pro POC target), compileSdk/targetSdk 35
+- minSdk 34 (Pixel 8 Pro POC target), compileSdk/targetSdk 36
 - No DI/network/database — scan history is a small JSON file in app storage
 
 ## Project layout

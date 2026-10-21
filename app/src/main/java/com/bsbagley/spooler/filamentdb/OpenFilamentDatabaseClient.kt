@@ -47,6 +47,8 @@ object OpenFilamentDatabaseClient {
         val bedMaxC: Int?,
         val diameterMm: Double?,
         val lengthMeters: Int?,
+        /** OFD filament product-line name, e.g. "PLA Matte" — used for Spoolman's filament name field. */
+        val filamentName: String?,
     )
 
     private const val BASE = "https://api.openfilamentdatabase.org/api/v1/brands"
@@ -118,6 +120,7 @@ object OpenFilamentDatabaseClient {
             bedMaxC = filament["max_bed_temperature"]?.jsonPrimitive?.intOrNull,
             diameterMm = diameter,
             lengthMeters = length,
+            filamentName = filament["name"]?.jsonPrimitive?.content,
         )
     }
 
@@ -140,6 +143,73 @@ object OpenFilamentDatabaseClient {
             ?.mapNotNull { it["name"]?.jsonPrimitive?.content }
             ?.sorted()
             ?: emptyList()
+
+    /**
+     * All material names offered by a specific brand — for the Spool Info
+     * Material dropdown, scoped to whatever Brand the user selected.
+     * Blocking; call from Dispatchers.IO. Returns empty on any miss.
+     */
+    fun listMaterialsForBrand(brandName: String): List<String> {
+        val brandsIndex = getJson("$BASE/index.json") ?: return emptyList()
+        val brandEntry = findByName(brandsIndex["brands"]?.jsonArray, brandName) ?: return emptyList()
+        val brandPath = brandEntry["path"]?.jsonPrimitive?.content ?: return emptyList()
+        val brandBase = resolve("$BASE/", brandPath).removeSuffix("index.json")
+        val brandDetail = getJson(resolve(brandBase, "index.json")) ?: return emptyList()
+        return brandDetail["materials"]?.jsonArray
+            ?.mapNotNull { (it as? JsonObject)?.get("material")?.jsonPrimitive?.content }
+            ?.sorted()
+            ?: emptyList()
+    }
+
+    /**
+     * All filament product-line names for a brand (e.g. "PLA Matte", "PLA
+     * Basic", "PETG-CF") — the Spool Info Material dropdown prefers these
+     * over base material names. Blocking; call from Dispatchers.IO.
+     */
+    fun listFilamentNamesForBrand(brandName: String): List<String> {
+        val brandsIndex = getJson("$BASE/index.json") ?: return emptyList()
+        val brandEntry = findByName(brandsIndex["brands"]?.jsonArray, brandName) ?: return emptyList()
+        val brandPath = brandEntry["path"]?.jsonPrimitive?.content ?: return emptyList()
+        val brandBase = resolve("$BASE/", brandPath).removeSuffix("index.json")
+        val brandDetail = getJson(resolve(brandBase, "index.json")) ?: return emptyList()
+        val materialPaths = brandDetail["materials"]?.jsonArray
+            ?.mapNotNull { (it as? JsonObject)?.get("path")?.jsonPrimitive?.content }
+            ?: return emptyList()
+
+        val names = mutableListOf<String>()
+        for (matPath in materialPaths) {
+            val matUrl = resolve(brandBase, matPath)
+            val matDetail = getJson(matUrl) ?: continue
+            matDetail["filaments"]?.jsonArray
+                ?.mapNotNull { (it as? JsonObject)?.get("name")?.jsonPrimitive?.content }
+                ?.forEach { names.add(it) }
+        }
+        return names.sorted()
+    }
+
+    /**
+     * Every distinct material name across all brands — for the Settings
+     * material-type filter. Blocking; call from Dispatchers.IO. Iterates
+     * every brand, so it's slow on first fetch — cache the result.
+     */
+    fun listAllMaterials(): List<String> {
+        val brandsIndex = getJson("$BASE/index.json") ?: return emptyList()
+        val brands = brandsIndex["brands"]?.jsonArray
+            ?.mapNotNull { it as? JsonObject }
+            ?.filter { (it["material_count"]?.jsonPrimitive?.intOrNull ?: 0) > 0 }
+            ?: return emptyList()
+
+        val all = mutableSetOf<String>()
+        for (brand in brands) {
+            val path = brand["path"]?.jsonPrimitive?.content ?: continue
+            val brandBase = resolve("$BASE/", path).removeSuffix("index.json")
+            val detail = getJson(resolve(brandBase, "index.json")) ?: continue
+            detail["materials"]?.jsonArray
+                ?.mapNotNull { (it as? JsonObject)?.get("material")?.jsonPrimitive?.content }
+                ?.forEach { all.add(it) }
+        }
+        return all.sorted()
+    }
 
     private fun getJson(url: String): JsonObject? {
         val text = try {
@@ -174,9 +244,18 @@ object OpenFilamentDatabaseClient {
     internal fun findMaterialByName(entries: JsonArray?, material: String): JsonObject? {
         val objs = entries?.mapNotNull { it as? JsonObject } ?: return null
         val normalized = normalizeMaterial(material)
+        // Exact match on normalized form (e.g. "PLA+"/"PLA-CF" → "PLA")
         objs.firstOrNull { it["material"]?.jsonPrimitive?.content.equals(normalized, ignoreCase = true) }
             ?.let { return it }
-        return objs.firstOrNull { it["material"]?.jsonPrimitive?.content.equals(material.trim(), ignoreCase = true) }
+        // Exact match on raw input
+        objs.firstOrNull { it["material"]?.jsonPrimitive?.content.equals(material.trim(), ignoreCase = true) }
+            ?.let { return it }
+        // Substring fallback: "PLA Matte" contains "PLA", "Silk PLA" contains "PLA"
+        return objs.firstOrNull { entry ->
+            val entryMaterial = entry["material"]?.jsonPrimitive?.content ?: return@firstOrNull false
+            entryMaterial in material.trim().split(' ', '+', '-').map { it.trim() }.filter { it.isNotBlank() }
+                || material.trim().contains(entryMaterial, ignoreCase = true)
+        }
     }
 
     /** "PLA+" / "PLA-CF" -> "PLA": specific formulations are filament product lines here, not material categories. */

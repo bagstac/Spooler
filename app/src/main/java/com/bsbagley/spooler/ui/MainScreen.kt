@@ -112,6 +112,7 @@ fun MainScreen(
         BackHandler { showLabelReview = false }
         val brandNames by viewModel.brandNames.collectAsState()
         val materialTypeFilter by viewModel.materialTypeFilter.collectAsState()
+        val materialNames by viewModel.materialNames.collectAsState()
         LabelReviewScreen(
             sendState = sendState,
             lookupState = lookupState,
@@ -124,6 +125,8 @@ fun MainScreen(
             onDismissLookup = viewModel::resetLookup,
             onLoadBrandNames = viewModel::loadBrandNames,
             materialTypeFilter = materialTypeFilter,
+            materialNames = materialNames,
+            onLoadMaterialsForBrand = viewModel::loadMaterialsForBrand,
             onBack = { showLabelReview = false; viewModel.resetLookup() },
         )
         return
@@ -158,6 +161,8 @@ fun MainScreen(
     if (showSettings) {
         val brandNamesRefreshing by viewModel.brandNamesRefreshing.collectAsState()
         val materialTypeFilter by viewModel.materialTypeFilter.collectAsState()
+        val allMaterialNames by viewModel.allMaterialNames.collectAsState()
+        val allMaterialNamesRefreshing by viewModel.allMaterialNamesRefreshing.collectAsState()
         SettingsDialog(
             currentUrl = spoolmanUrl,
             showRawDump = showRawDump,
@@ -166,6 +171,8 @@ fun MainScreen(
             spoolmanEnabled = spoolmanEnabledSetting,
             brandNamesRefreshing = brandNamesRefreshing,
             materialTypeFilter = materialTypeFilter,
+            allMaterialNames = allMaterialNames,
+            allMaterialNamesRefreshing = allMaterialNamesRefreshing,
             onSave = { url, rawDumpEnabled, historyEnabled, writeTagEnabled, spoolmanEnabled ->
                 viewModel.setSpoolmanUrl(url)
                 viewModel.setShowRawDump(rawDumpEnabled)
@@ -176,6 +183,7 @@ fun MainScreen(
             },
             onRefreshBrandNames = viewModel::refreshBrandNames,
             onSetMaterialTypeFilter = viewModel::setMaterialTypeFilter,
+            onRefreshMaterialNames = viewModel::refreshAllMaterialNames,
             onDismiss = { showSettings = false },
         )
     }
@@ -578,6 +586,8 @@ private fun SettingsDialog(
     spoolmanEnabled: Boolean,
     brandNamesRefreshing: Boolean,
     materialTypeFilter: Set<String>,
+    allMaterialNames: List<String>,
+    allMaterialNamesRefreshing: Boolean,
     onSave: (
         url: String,
         showRawDump: Boolean,
@@ -587,6 +597,7 @@ private fun SettingsDialog(
     ) -> Unit,
     onRefreshBrandNames: () -> Unit,
     onSetMaterialTypeFilter: (Set<String>) -> Unit,
+    onRefreshMaterialNames: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by remember { mutableStateOf(currentUrl) }
@@ -595,6 +606,8 @@ private fun SettingsDialog(
     var writeTagEnabled by remember { mutableStateOf(showWriteTag) }
     var showMaterialTypeFilter by remember { mutableStateOf(false) }
     var spoolmanEnabledState by remember { mutableStateOf(spoolmanEnabled) }
+    // Material names from OFD when available, else the hardcoded fallback.
+    val materialNamesSource = allMaterialNames.ifEmpty { MATERIAL_OPTIONS }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
@@ -696,13 +709,31 @@ private fun SettingsDialog(
                             if (materialTypeFilter.isEmpty()) {
                                 "Showing all types in Spool Info"
                             } else {
-                                "Showing ${materialTypeFilter.size} of ${MATERIAL_OPTIONS.size} types in Spool Info"
+                                "Showing ${materialTypeFilter.size} of ${materialNamesSource.size} types in Spool Info"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     TextButton(onClick = { showMaterialTypeFilter = true }) { Text("Choose…") }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Material list", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Fetched from the Open Filament Database",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (allMaterialNamesRefreshing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        TextButton(onClick = onRefreshMaterialNames) { Text("Refresh") }
+                    }
                 }
             }
         },
@@ -717,23 +748,26 @@ private fun SettingsDialog(
     if (showMaterialTypeFilter) {
         MaterialTypeFilterDialog(
             currentFilter = materialTypeFilter,
+            allMaterialNames = allMaterialNames,
             onSave = { onSetMaterialTypeFilter(it); showMaterialTypeFilter = false },
             onDismiss = { showMaterialTypeFilter = false },
         )
     }
 }
 
-/** Checklist of MATERIAL_OPTIONS — empty selection is disallowed (would leave Spool Info's Material picker with nothing to show). */
+/** Checklist of material names from OFD (or MATERIAL_OPTIONS fallback) — empty selection is disallowed. */
 @Composable
 private fun MaterialTypeFilterDialog(
     currentFilter: Set<String>,
+    allMaterialNames: List<String>,
     onSave: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val source = allMaterialNames.ifEmpty { MATERIAL_OPTIONS }
     // An empty stored filter means "no filter" (show everything) — start
     // the checklist with every box checked to reflect that actual state.
     var selected by remember {
-        mutableStateOf(currentFilter.ifEmpty { MATERIAL_OPTIONS.toSet() })
+        mutableStateOf(currentFilter.ifEmpty { source.toSet() })
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -747,7 +781,7 @@ private fun MaterialTypeFilterDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                MATERIAL_OPTIONS.forEach { option ->
+                source.forEach { option ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

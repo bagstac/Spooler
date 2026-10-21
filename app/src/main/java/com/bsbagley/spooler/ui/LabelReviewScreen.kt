@@ -94,6 +94,8 @@ fun LabelReviewScreen(
     brandNames: List<String> = emptyList(),
     onLoadBrandNames: () -> Unit = {},
     materialTypeFilter: Set<String> = emptySet(),
+    materialNames: List<String> = emptyList(),
+    onLoadMaterialsForBrand: (String) -> Unit = {},
 ) {
     LaunchedEffect(Unit) { onLoadBrandNames() }
 
@@ -112,6 +114,19 @@ fun LabelReviewScreen(
     var captureField by remember { mutableStateOf<FilamentField?>(null) }
     var showHexInfo by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // OFD filament product-line name (e.g. "PLA Matte") — populated by the
+    // auto-lookup, used as the Spoolman filament name instead of the raw material.
+    var ofdFilamentName by remember { mutableStateOf("") }
+
+    // When Brand changes, fetch that brand's materials from the OFD (debounced
+    // so it doesn't fire on every keystroke while typing a brand name).
+    LaunchedEffect(brand) {
+        if (brand.isNotBlank()) {
+            delay(400)
+            onLoadMaterialsForBrand(brand)
+        }
+    }
 
     // Auto-trigger the Open Filament Database lookup once Brand + Material +
     // Color name are all filled in. Keyed on the three values so editing any
@@ -139,6 +154,7 @@ fun LabelReviewScreen(
                 if (bedMax.isBlank()) found.bedMaxC?.let { bedMax = it.toString() }
                 found.diameterMm?.let { diameter = it.toString() }
                 if (length.isBlank()) found.lengthMeters?.let { length = it.toString() }
+                found.filamentName?.let { ofdFilamentName = it }
                 snackbarHostState.showSnackbar("Filled in from the Open Filament Database")
                 onDismissLookup()
             }
@@ -224,6 +240,7 @@ fun LabelReviewScreen(
             bedMaxC = bedMax.toIntOrNull(),
             diameterMm = d,
             lengthMeters = length.toIntOrNull(),
+            filamentName = ofdFilamentName.ifBlank { null },
         )
     }
 
@@ -249,9 +266,16 @@ fun LabelReviewScreen(
     @Composable
     fun materialField() {
         var expanded by remember { mutableStateOf(false) }
-        // Empty filter means "no filter" — Settings' material-type picker.
-        val visibleOptions = remember(materialTypeFilter) {
-            if (materialTypeFilter.isEmpty()) MATERIAL_OPTIONS else MATERIAL_OPTIONS.filter { it in materialTypeFilter }
+        // Brand-scoped filaments from OFD when available, else the hardcoded
+        // fallback list. The settings material-type filter only applies to the
+        // fallback — brand-scoped filaments are shown unfiltered since the
+        // filter keys on base materials (e.g. "PLA"), not filament names
+        // (e.g. "PLA Matte").
+        val isBrandScoped = materialNames.isNotEmpty()
+        val source = if (isBrandScoped) materialNames else MATERIAL_OPTIONS
+        val visibleOptions = remember(materialTypeFilter, materialNames) {
+            if (!isBrandScoped && materialTypeFilter.isNotEmpty()) source.filter { it in materialTypeFilter }
+            else source
         }
         ExposedDropdownMenuBox(
             expanded = expanded,

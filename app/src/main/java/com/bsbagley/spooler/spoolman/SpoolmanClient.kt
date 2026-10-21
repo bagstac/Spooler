@@ -103,7 +103,11 @@ class SpoolmanClient(baseUrl: String) {
 
         return request("POST", "/filament", buildJsonObject {
             put("vendor_id", vendorId)
-            put("name", info.material.ifEmpty { info.sku })
+            // Prefer the OFD filament product-line name (e.g. "PLA Matte") over
+            // the raw material — makes Spoolman's UI more readable.
+            // ponytail: Option B fallback — if OFD misses, try Spoolman's own
+            // GET /external/filament/search?q=... for manufacturer+name+material.
+            put("name", info.filamentName?.ifBlank { null } ?: info.material.ifEmpty { info.sku })
             if (info.material.isNotEmpty()) put("material", info.material)
             put("color_hex", info.colorHex)
             put("density", DEFAULT_DENSITY_G_CM3)

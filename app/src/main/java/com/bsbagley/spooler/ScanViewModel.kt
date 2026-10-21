@@ -5,6 +5,7 @@ import android.nfc.Tag
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.bsbagley.spooler.data.BrandNamesStore
+import com.bsbagley.spooler.data.MaterialNamesStore
 import com.bsbagley.spooler.data.ScanHistoryStore
 import com.bsbagley.spooler.data.ScanRecord
 import com.bsbagley.spooler.data.SettingsStore
@@ -61,6 +62,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val store = ScanHistoryStore(app)
     private val settings = SettingsStore(app)
     private val brandNamesStore = BrandNamesStore(app)
+    private val materialNamesStore = MaterialNamesStore(app)
     private val haptics = Haptics(app)
     private val prettyJson = Json { prettyPrint = true }
 
@@ -103,11 +105,21 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
     private val _brandNamesRefreshing = MutableStateFlow(false)
     val brandNamesRefreshing: StateFlow<Boolean> = _brandNamesRefreshing.asStateFlow()
 
+    private val _materialNames = MutableStateFlow<List<String>>(emptyList())
+    val materialNames: StateFlow<List<String>> = _materialNames.asStateFlow()
+
+    private val _allMaterialNames = MutableStateFlow<List<String>>(emptyList())
+    val allMaterialNames: StateFlow<List<String>> = _allMaterialNames.asStateFlow()
+
+    private val _allMaterialNamesRefreshing = MutableStateFlow(false)
+    val allMaterialNamesRefreshing: StateFlow<Boolean> = _allMaterialNamesRefreshing.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _history.value = store.loadAll()
         }
         loadBrandNames()
+        loadAllMaterialNames()
     }
 
     /** Entry point from NfcAdapter.ReaderCallback — called on a binder thread. */
@@ -348,6 +360,51 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 brandNamesStore.save(fetched)
             }
             _brandNamesRefreshing.value = false
+        }
+    }
+
+    /** Loads filament product-line names for a specific brand (live, no cache) — called when the Brand field changes in Spool Info. */
+    fun loadMaterialsForBrand(brand: String) {
+        if (brand.isBlank()) { _materialNames.value = emptyList(); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            _materialNames.value = runCatching {
+                OpenFilamentDatabaseClient.listFilamentNamesForBrand(brand)
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    /**
+     * Populates the global material-name list for the Settings filter: local
+     * cache first, otherwise a one-time fetch from the OFD (persisted to
+     * cache). Called from init and when the Settings dialog opens.
+     */
+    fun loadAllMaterialNames() {
+        if (_allMaterialNames.value.isNotEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val cached = materialNamesStore.loadAll()
+            if (cached.isNotEmpty()) {
+                _allMaterialNames.value = cached
+                return@launch
+            }
+            val fetched = runCatching { OpenFilamentDatabaseClient.listAllMaterials() }.getOrDefault(emptyList())
+            if (fetched.isNotEmpty()) {
+                _allMaterialNames.value = fetched
+                materialNamesStore.save(fetched)
+            }
+        }
+    }
+
+    /** Settings' refresh for the global material list — re-fetches from OFD regardless of cache. */
+    fun refreshAllMaterialNames() {
+        if (_allMaterialNamesRefreshing.value) return
+        _allMaterialNamesRefreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val fetched = runCatching { OpenFilamentDatabaseClient.listAllMaterials() }.getOrDefault(emptyList())
+            if (fetched.isNotEmpty()) {
+                _allMaterialNames.value = fetched
+                materialNamesStore.save(fetched)
+            }
+            _allMaterialNamesRefreshing.value = false
         }
     }
 

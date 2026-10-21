@@ -114,4 +114,6 @@ data class FilamentInfo(
     val bedMaxC: Int? = null,
     val diameterMm: Double? = null,
     val lengthMeters: Int? = null,
+    /** OFD filament product-line name, e.g. "PLA Matte" — used for Spoolman's filament name. */
+    val filamentName: String? = null,
 )
